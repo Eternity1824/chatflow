@@ -6,8 +6,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ChatClient {
+    private static final Logger logger = LoggerFactory.getLogger(ChatClient.class);
     private static final int TOTAL_MESSAGES = 500_000;
     private static final int WARMUP_THREADS = 32;
     private static final int WARMUP_MESSAGES_PER_THREAD = 1000;
@@ -27,9 +30,9 @@ public class ChatClient {
     }
 
     public void run() throws InterruptedException {
-        System.out.println("Starting ChatFlow Client");
-        System.out.println("Server URL: " + serverUrl);
-        System.out.println("Total messages to send: " + TOTAL_MESSAGES);
+        logger.info("Starting ChatFlow Client");
+        logger.info("Server URL: {}", serverUrl);
+        logger.info("Total messages to send: {}", TOTAL_MESSAGES);
 
         BlockingQueue<String> messageQueue = new ArrayBlockingQueue<>(100_000);
 
@@ -38,25 +41,23 @@ public class ChatClient {
 
         metrics.markStart();
 
-        System.out.println("\n=== Warmup Phase ===");
-        System.out.println("Starting " + WARMUP_THREADS + " threads, each sending " + 
-                          WARMUP_MESSAGES_PER_THREAD + " messages");
+        logger.info("=== Warmup Phase ===");
+        logger.info("Starting {} threads, each sending {} messages", WARMUP_THREADS, WARMUP_MESSAGES_PER_THREAD);
         long warmupStart = System.currentTimeMillis();
         runPhase(messageQueue, WARMUP_THREADS, WARMUP_MESSAGES_PER_THREAD);
         long warmupEnd = System.currentTimeMillis();
-        System.out.println("Warmup completed in " + (warmupEnd - warmupStart) + " ms");
+        logger.info("Warmup completed in {} ms", (warmupEnd - warmupStart));
 
-        System.out.println("\n=== Main Phase ===");
+        logger.info("=== Main Phase ===");
         int mainThreads = calculateOptimalThreads();
         int messagesPerThread = MAIN_PHASE_MESSAGES / mainThreads;
         int remainder = MAIN_PHASE_MESSAGES % mainThreads;
         
-        System.out.println("Starting " + mainThreads + " threads for remaining " + 
-                          MAIN_PHASE_MESSAGES + " messages");
+        logger.info("Starting {} threads for remaining {} messages", mainThreads, MAIN_PHASE_MESSAGES);
         long mainStart = System.currentTimeMillis();
         runPhase(messageQueue, mainThreads, messagesPerThread, remainder);
         long mainEnd = System.currentTimeMillis();
-        System.out.println("Main phase completed in " + (mainEnd - mainStart) + " ms");
+        logger.info("Main phase completed in {} ms", (mainEnd - mainStart));
 
         generatorThread.join();
 

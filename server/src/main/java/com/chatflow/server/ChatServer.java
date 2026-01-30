@@ -9,11 +9,15 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-
-
+/**
+ * WebSocket Chat Server
+ */
 public class ChatServer {
+
+    private static final Logger logger = LoggerFactory.getLogger(ChatServer.class);
 
     private final int port;
 
@@ -58,8 +62,8 @@ public class ChatServer {
                     });
 
             ChannelFuture future = b.bind(port).sync();
-            System.out.println("WebSocket Chat Server started on port " + port);
-            System.out.println("Connect via: ws://localhost:" + port + "/chat?roomId=<room>");
+            logger.info("WebSocket Chat Server started on port {}", port);
+            logger.info("Connect via: ws://localhost:{}/chat?roomId=<room>", port);
 
             future.channel().closeFuture().sync();
 

@@ -8,12 +8,16 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.time.Instant;
 
 public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final Logger logger = LoggerFactory.getLogger(WebSocketChatHandler.class);
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) throws Exception {
@@ -26,47 +30,68 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
             roomId = "unknown";
         }
 
-        String jsonText = ((TextWebSocketFrame) frame).text();
-        System.out.println("Received (roomId=" + roomId + "): " + jsonText);
-
+        String channelId = ctx.channel().id().asShortText();
+        MDC.put("roomId", roomId);
+        MDC.put("channelId", channelId);
         try {
-            // 1. Parse JSON
-            ChatMessage message = objectMapper.readValue(jsonText, ChatMessage.class);
+            String jsonText = ((TextWebSocketFrame) frame).text();
+            logger.info("Received (roomId={}): {}", roomId, jsonText);
 
-            // 2. Validate message
-            MessageValidator.ValidationResult result = MessageValidator.validate(message);
+            try {
+                // 1. Parse JSON
+                ChatMessage message = objectMapper.readValue(jsonText, ChatMessage.class);
 
-            String serverTimestamp = Instant.now().toString();
+                // 2. Validate message
+                MessageValidator.ValidationResult result = MessageValidator.validate(message);
 
-            if (!result.isValid()) {
-                // 3. Send error response for invalid message
+                String serverTimestamp = Instant.now().toString();
+
+                if (!result.isValid()) {
+                    // 3. Send error response for invalid message
+                    ServerResponse errorResponse = ServerResponse.error(
+                            result.getErrorMessage(), serverTimestamp);
+                    String responseJson = objectMapper.writeValueAsString(errorResponse);
+                    ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+                    return;
+                }
+
+                // 4. Valid message - echo back with server timestamp
+                ServerResponse successResponse = ServerResponse.success(message, serverTimestamp);
+                String responseJson = objectMapper.writeValueAsString(successResponse);
+                ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+
+                logger.info("Validated and echoed (roomId={}): {}", roomId, message);
+
+            } catch (Exception e) {
+                // 5. Invalid JSON format
+                String serverTimestamp = Instant.now().toString();
                 ServerResponse errorResponse = ServerResponse.error(
-                        result.getErrorMessage(), serverTimestamp);
+                        "Invalid JSON format: " + e.getMessage(), serverTimestamp);
                 String responseJson = objectMapper.writeValueAsString(errorResponse);
                 ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
-                return;
+                logger.warn("Invalid JSON format", e);
             }
-
-            // 4. Valid message - echo back with server timestamp
-            ServerResponse successResponse = ServerResponse.success(message, serverTimestamp);
-            String responseJson = objectMapper.writeValueAsString(successResponse);
-            ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
-
-            System.out.println("Validated and echoed (roomId=" + roomId + "): " + message);
-
-        } catch (Exception e) {
-            // 5. Invalid JSON format
-            String serverTimestamp = Instant.now().toString();
-            ServerResponse errorResponse = ServerResponse.error(
-                    "Invalid JSON format: " + e.getMessage(), serverTimestamp);
-            String responseJson = objectMapper.writeValueAsString(errorResponse);
-            ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+        } finally {
+            MDC.remove("roomId");
+            MDC.remove("channelId");
         }
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        cause.printStackTrace();
+        String roomId = ctx.channel().attr(RoomIdExtractorHandler.ROOM_ID_ATTR).get();
+        if (roomId == null || roomId.isBlank()) {
+            roomId = "unknown";
+        }
+        String channelId = ctx.channel().id().asShortText();
+        MDC.put("roomId", roomId);
+        MDC.put("channelId", channelId);
+        try {
+            logger.error("WebSocket handler error", cause);
+        } finally {
+            MDC.remove("roomId");
+            MDC.remove("channelId");
+        }
         ctx.close();
     }
 }

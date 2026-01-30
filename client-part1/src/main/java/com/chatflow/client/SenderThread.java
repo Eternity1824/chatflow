@@ -2,10 +2,14 @@ package com.chatflow.client;
 
 import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.util.concurrent.BlockingQueue;
 
 public class SenderThread implements Runnable {
+    private static final Logger logger = LoggerFactory.getLogger(SenderThread.class);
     private static final int MAX_RETRIES = 5;
     private static final int INITIAL_BACKOFF_MS = 100;
 
@@ -33,11 +37,24 @@ public class SenderThread implements Runnable {
                 for (int retry = 0; retry < MAX_RETRIES && !sent; retry++) {
                     try {
                         Channel channel = connectionPool.getOrCreateConnection(roomId);
-                        channel.writeAndFlush(new TextWebSocketFrame(jsonMessage)).sync();
-                        sent = true;
+                        String channelId = channel.id().asShortText();
+                        MDC.put("roomId", roomId);
+                        MDC.put("channelId", channelId);
+                        try {
+                            channel.writeAndFlush(new TextWebSocketFrame(jsonMessage)).sync();
+                            sent = true;
+                        } finally {
+                            MDC.remove("roomId");
+                            MDC.remove("channelId");
+                        }
 
                     } catch (Exception e) {
-                        System.err.println("Send failed (attempt " + (retry + 1) + "): " + e.getMessage());
+                        MDC.put("roomId", roomId);
+                        try {
+                            logger.warn("Send failed (attempt {})", (retry + 1), e);
+                        } finally {
+                            MDC.remove("roomId");
+                        }
                         connectionPool.removeConnection(roomId);
                         if (retry < MAX_RETRIES - 1) {
                             int backoffMs = INITIAL_BACKOFF_MS * (1 << retry);
@@ -47,12 +64,16 @@ public class SenderThread implements Runnable {
                 }
 
                 if (!sent) {
-                    System.err.println("Failed to send message after " + MAX_RETRIES + " retries");
+                    MDC.put("roomId", roomId);
+                    try {
+                        logger.error("Failed to send message after {} retries", MAX_RETRIES);
+                    } finally {
+                        MDC.remove("roomId");
+                    }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Sender thread error: " + e.getMessage());
-            e.printStackTrace();
+            logger.error("Sender thread error", e);
         }
     }
 

@@ -12,27 +12,42 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
 import io.netty.util.CharsetUtil;
 import io.netty.util.AttributeKey;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 public class RoomIdExtractorHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     public static final AttributeKey<String> ROOM_ID_ATTR = AttributeKey.valueOf("roomId");
+    private static final Logger logger = LoggerFactory.getLogger(RoomIdExtractorHandler.class);
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
         String uri = req.uri();
-        if (isHealthCheck(uri)) {
-            sendResponse(ctx, HttpResponseStatus.OK, "OK");
-            return;
+        String channelId = ctx.channel().id().asShortText();
+        MDC.put("channelId", channelId);
+        try {
+            if (isHealthCheck(uri)) {
+                sendResponse(ctx, HttpResponseStatus.OK, "OK");
+                return;
+            }
+            String roomId = extractRoomId(uri);
+            if (roomId != null && !roomId.isBlank()) {
+                MDC.put("roomId", roomId);
+                ctx.channel().attr(ROOM_ID_ATTR).set(roomId);
+            }
+
+            if (isChatPath(uri) && (roomId == null || roomId.isBlank())) {
+                logger.warn("Missing roomId for request uri={}", uri);
+                sendResponse(ctx, HttpResponseStatus.BAD_REQUEST, "Missing roomId");
+                return;
+            }
+
+            ctx.fireChannelRead(req.retain());
+        } finally {
+            MDC.remove("roomId");
+            MDC.remove("channelId");
         }
-        String roomId = extractRoomId(uri);
-        if (isChatPath(uri) && (roomId == null || roomId.isBlank())) {
-            sendResponse(ctx, HttpResponseStatus.BAD_REQUEST, "Missing roomId");
-            return;
-        }
-        if (roomId != null && !roomId.isBlank()) {
-            ctx.channel().attr(ROOM_ID_ATTR).set(roomId);
-        }
-        ctx.fireChannelRead(req.retain());
     }
 
     private boolean isHealthCheck(String uri) {
