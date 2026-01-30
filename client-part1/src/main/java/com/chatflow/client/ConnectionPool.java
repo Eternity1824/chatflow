@@ -90,7 +90,7 @@ public class ConnectionPool {
         }
     }
 
-    private Channel connect(String roomId) throws Exception {
+    Channel connect(String roomId) throws Exception {
         URI uri = new URI(serverUrl + "?roomId=" + roomId);
         String host = uri.getHost();
         int port = uri.getPort() > 0 ? uri.getPort() : 80;
