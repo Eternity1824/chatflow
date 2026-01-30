@@ -7,6 +7,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolConfig;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import org.slf4j.Logger;
@@ -53,8 +54,12 @@ public class ChatServer {
                             pipeline.addLast("roomIdExtractor", new RoomIdExtractorHandler());
 
                             // WebSocket protocol handler(ping, pong, close, etc.)
+                            WebSocketServerProtocolConfig wsConfig = WebSocketServerProtocolConfig.newBuilder()
+                                    .websocketPath("/chat")
+                                    .checkStartsWith(true)
+                                    .build();
                             pipeline.addLast("webSocketProtocol",
-                                    new WebSocketServerProtocolHandler("/chat", null, true));
+                                    new WebSocketServerProtocolHandler(wsConfig));
 
                             // Add WebSocket handler
                             pipeline.addLast(new WebSocketChatHandler());

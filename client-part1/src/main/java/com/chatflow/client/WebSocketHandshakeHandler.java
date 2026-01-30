@@ -14,11 +14,23 @@ public final class WebSocketHandshakeHandler extends ChannelInboundHandlerAdapte
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        if (evt == WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE) {
-            if (!handshakePromise.isDone()) {
-                handshakePromise.setSuccess(null);
+        if (evt instanceof WebSocketClientProtocolHandler.ClientHandshakeStateEvent) {
+            WebSocketClientProtocolHandler.ClientHandshakeStateEvent state =
+                    (WebSocketClientProtocolHandler.ClientHandshakeStateEvent) evt;
+            if (state == WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_COMPLETE) {
+                if (!handshakePromise.isDone()) {
+                    handshakePromise.setSuccess(null);
+                }
+                ctx.pipeline().remove(this);
+                return;
             }
-            ctx.pipeline().remove(this);
+            if (state == WebSocketClientProtocolHandler.ClientHandshakeStateEvent.HANDSHAKE_ISSUED) {
+                return;
+            }
+            if (!handshakePromise.isDone()) {
+                handshakePromise.setFailure(new IllegalStateException("Handshake failed: " + state));
+            }
+            ctx.close();
             return;
         }
         super.userEventTriggered(ctx, evt);
@@ -30,5 +42,12 @@ public final class WebSocketHandshakeHandler extends ChannelInboundHandlerAdapte
             handshakePromise.setFailure(cause);
         }
         ctx.close();
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) {
+        if (!handshakePromise.isDone()) {
+            handshakePromise.setFailure(new IllegalStateException("Channel inactive before handshake completed"));
+        }
     }
 }

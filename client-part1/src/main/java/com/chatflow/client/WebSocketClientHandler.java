@@ -11,9 +11,11 @@ import org.slf4j.MDC;
 public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final Logger logger = LoggerFactory.getLogger(WebSocketClientHandler.class);
     private final MetricsCollector metrics;
+    private final java.util.concurrent.CountDownLatch responseLatch;
 
-    public WebSocketClientHandler(MetricsCollector metrics) {
+    public WebSocketClientHandler(MetricsCollector metrics, java.util.concurrent.CountDownLatch responseLatch) {
         this.metrics = metrics;
+        this.responseLatch = responseLatch;
     }
 
     @Override
@@ -21,6 +23,9 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
         if (frame instanceof TextWebSocketFrame) {
             String response = ((TextWebSocketFrame) frame).text();
             metrics.recordSuccess();
+            if (responseLatch != null) {
+                responseLatch.countDown();
+            }
         }
     }
 

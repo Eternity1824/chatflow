@@ -19,6 +19,8 @@ import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ConnectionPool {
@@ -28,11 +30,15 @@ public class ConnectionPool {
     private final EventLoopGroup eventLoopGroup;
     private final MetricsCollector metrics;
     private final Bootstrap bootstrap;
+    private final java.util.concurrent.CountDownLatch responseLatch;
+    private static final long HANDSHAKE_TIMEOUT_SECONDS = 10;
 
-    public ConnectionPool(String serverUrl, EventLoopGroup eventLoopGroup, MetricsCollector metrics) {
+    public ConnectionPool(String serverUrl, EventLoopGroup eventLoopGroup, MetricsCollector metrics,
+                          java.util.concurrent.CountDownLatch responseLatch) {
         this.serverUrl = serverUrl;
         this.eventLoopGroup = eventLoopGroup;
         this.metrics = metrics;
+        this.responseLatch = responseLatch;
         this.roomChannels = new ConcurrentHashMap<>();
         this.inFlightConnections = new ConcurrentHashMap<>();
         this.bootstrap = createBootstrap();
@@ -76,12 +82,17 @@ public class ConnectionPool {
         }
 
         try {
-            return inFlight.join();
+            return inFlight.get(HANDSHAKE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            inFlightConnections.remove(roomId, inFlight);
+            throw new IllegalStateException("Handshake timed out for roomId=" + roomId, e);
         } catch (CompletionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof Exception) {
                 throw (Exception) cause;
             }
+            throw e;
+        } catch (Exception e) {
             throw e;
         } finally {
             if (Thread.currentThread().isInterrupted()) {
@@ -113,7 +124,7 @@ public class ConnectionPool {
                                 new DefaultHttpHeaders()));
                 pipeline.addLast(wsHandler);
                 pipeline.addLast(new WebSocketHandshakeHandler(handshakePromise));
-                pipeline.addLast(new WebSocketClientHandler(metrics));
+                pipeline.addLast(new WebSocketClientHandler(metrics, responseLatch));
             }
         });
 

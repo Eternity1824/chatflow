@@ -2,6 +2,8 @@ package com.chatflow.client;
 
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -21,12 +23,14 @@ public class ChatClient {
     private final MetricsCollector metrics;
     private final EventLoopGroup sharedEventLoopGroup;
     private final ConnectionPool connectionPool;
+    private final CountDownLatch responseLatch;
 
     public ChatClient(String serverUrl) {
         this.serverUrl = serverUrl;
         this.metrics = new MetricsCollector();
         this.sharedEventLoopGroup = new NioEventLoopGroup();
-        this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics);
+        this.responseLatch = new CountDownLatch(TOTAL_MESSAGES);
+        this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics, responseLatch);
     }
 
     public void run() throws InterruptedException {
@@ -60,6 +64,12 @@ public class ChatClient {
         logger.info("Main phase completed in {} ms", (mainEnd - mainStart));
 
         generatorThread.join();
+
+        logger.info("Waiting for server responses...");
+        boolean allResponses = responseLatch.await(30, TimeUnit.SECONDS);
+        if (!allResponses) {
+            logger.warn("Timed out waiting for responses. Remaining: {}", responseLatch.getCount());
+        }
 
         metrics.markEnd();
         metrics.printSummary();
