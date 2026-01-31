@@ -44,3 +44,5 @@ bin/
 AGENTS.md
 
 .venv/
+
+results/
