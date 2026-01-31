@@ -1,7 +1,16 @@
 package com.chatflow.client;
 
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFactory;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollSocketChannel;
+import io.netty.channel.kqueue.KQueue;
+import io.netty.channel.kqueue.KQueueEventLoopGroup;
+import io.netty.channel.kqueue.KQueueSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
@@ -17,6 +26,7 @@ public class ChatClient {
     private final String serverUrl;
     private final DetailedMetricsCollector metrics;
     private final EventLoopGroup sharedEventLoopGroup;
+    private final ChannelFactory<? extends Channel> channelFactory;
     private final ConnectionPool connectionPool;
     private final CountDownLatch responseLatch;
     private final int totalMessages;
@@ -44,7 +54,23 @@ public class ChatClient {
         this.flushIntervalMs = settings.getFlushIntervalMs();
         this.flushSync = settings.isFlushSync();
         this.connectionsPerRoom = settings.getConnectionsPerRoom();
-        this.sharedEventLoopGroup = new NioEventLoopGroup();
+        EventLoopGroup eventLoopGroup;
+        ChannelFactory<? extends Channel> socketChannelFactory;
+        if (Epoll.isAvailable()) {
+            eventLoopGroup = new EpollEventLoopGroup();
+            socketChannelFactory = EpollSocketChannel::new;
+            logger.info("Using EpollEventLoopGroup");
+        } else if (KQueue.isAvailable()) {
+            eventLoopGroup = new KQueueEventLoopGroup();
+            socketChannelFactory = KQueueSocketChannel::new;
+            logger.info("Using KQueueEventLoopGroup");
+        } else {
+            eventLoopGroup = new NioEventLoopGroup();
+            socketChannelFactory = NioSocketChannel::new;
+            logger.info("Using NioEventLoopGroup");
+        }
+        this.sharedEventLoopGroup = eventLoopGroup;
+        this.channelFactory = socketChannelFactory;
         this.responseLatch = new CountDownLatch(totalMessages);
         try {
             this.metrics = new DetailedMetricsCollector(totalMessages, responseLatch, "results/metrics.csv");
@@ -52,7 +78,9 @@ public class ChatClient {
             throw new RuntimeException("Failed to initialize metrics collector", e);
         }
         this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics,
-                settings.getConnectionsPerRoom());
+                settings.getConnectionsPerRoom(), settings.getHandshakeTimeoutSeconds(),
+                settings.getMaxConcurrentHandshakes(), settings.getHandshakeRetryDelayMs(),
+                channelFactory);
     }
 
     public void run() throws InterruptedException {

@@ -31,10 +31,6 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
         if (roomId == null || roomId.isBlank()) {
             roomId = "unknown";
         }
-
-        String channelId = ctx.channel().id().asShortText();
-        MDC.put("roomId", roomId);
-        MDC.put("channelId", channelId);
         try {
             String jsonText = ((TextWebSocketFrame) frame).text();
             // logger.info("Received (roomId={}): {}", roomId, jsonText);
@@ -88,8 +84,7 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                 logger.warn("Invalid JSON format", e);
             }
         } finally {
-            MDC.remove("roomId");
-            MDC.remove("channelId");
+            // Intentionally empty: avoid per-message MDC overhead on hot path.
         }
     }
 

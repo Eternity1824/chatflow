@@ -12,6 +12,7 @@ import org.slf4j.MDC;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 
 public class SenderThread implements Runnable {
@@ -20,6 +21,7 @@ public class SenderThread implements Runnable {
     private static final int INITIAL_BACKOFF_MS = 100;
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private final Random random = new Random();
 
     private static final class BatchState {
         int pendingCount;
@@ -117,8 +119,9 @@ public class SenderThread implements Runnable {
                         }
                         connectionPool.removeConnection(roomId);
                         if (retry < MAX_RETRIES - 1) {
-                            int backoffMs = INITIAL_BACKOFF_MS * (1 << retry);
-                            Thread.sleep(backoffMs);
+                            int baseBackoffMs = INITIAL_BACKOFF_MS * (1 << retry);
+                            int jitteredBackoffMs = (int) (baseBackoffMs * (1.0 + random.nextDouble()));
+                            Thread.sleep(jitteredBackoffMs);
                         }
                     }
                 }

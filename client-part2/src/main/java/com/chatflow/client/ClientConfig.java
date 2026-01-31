@@ -39,6 +39,9 @@ public class ClientConfig {
         private int warmupThreads = 32;
         private int warmupMessagesPerThread = 1000;
         private int connectionsPerRoom = 1;
+        private int handshakeTimeoutSeconds = 20;
+        private int maxConcurrentHandshakes = 6;
+        private int handshakeRetryDelayMs = 10;
         private int responseWaitSeconds = 30;
         private int batchSize = 100;
         private int batchMaxBytes = 65536;
@@ -63,6 +66,18 @@ public class ClientConfig {
 
         public int getConnectionsPerRoom() {
             return connectionsPerRoom;
+        }
+
+        public int getHandshakeTimeoutSeconds() {
+            return handshakeTimeoutSeconds;
+        }
+
+        public int getMaxConcurrentHandshakes() {
+            return maxConcurrentHandshakes;
+        }
+
+        public int getHandshakeRetryDelayMs() {
+            return handshakeRetryDelayMs;
         }
 
         public int getResponseWaitSeconds() {

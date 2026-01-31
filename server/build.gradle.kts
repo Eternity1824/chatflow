@@ -21,6 +21,7 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     implementation("io.netty:netty-all:4.2.8.Final")
+    implementation("io.netty:netty-transport-native-epoll:4.2.8.Final:linux-x86_64")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.15.2")
     implementation(project(":common"))
 
