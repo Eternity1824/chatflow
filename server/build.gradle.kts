@@ -1,5 +1,7 @@
 plugins {
     id("java")
+    id("application")
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = "com.chatflow"
@@ -7,6 +9,10 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+}
+
+application {
+    mainClass.set("com.chatflow.server.ChatServer")
 }
 
 dependencies {
@@ -26,4 +32,9 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
+    archiveClassifier.set("all")
+    mergeServiceFiles()
 }

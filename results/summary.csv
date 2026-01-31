@@ -1,8 +1,8 @@
 metric,value
-successful_messages,499631
-error_responses,369
+successful_messages,1998021
+error_responses,1979
 failed_messages,0
-total_runtime_ms,5495
-throughput_msg_per_sec,90924.66
+total_runtime_ms,15754
+throughput_msg_per_sec,126826.27
 total_connections,20
 reconnections,0
