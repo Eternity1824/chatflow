@@ -1,192 +1,233 @@
 package com.chatflow.client;
 
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import com.chatflow.protocol.ChatMessage;
+
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 
 public class DetailedMetricsCollector {
-    private final AtomicInteger successfulMessages = new AtomicInteger(0);
-    private final AtomicInteger failedMessages = new AtomicInteger(0);
-    private final AtomicInteger totalConnections = new AtomicInteger(0);
-    private final AtomicInteger reconnections = new AtomicInteger(0);
-    private final AtomicLong startTime = new AtomicLong(0);
-    private final AtomicLong endTime = new AtomicLong(0);
+    private final CountDownLatch responseLatch;
+    private final long[] latenciesMs;
+    private final long[] ackTimesMs;
+    private final AtomicInteger latencyIndex = new AtomicInteger(0);
+    private final AtomicInteger ackIndex = new AtomicInteger(0);
+    private final LongAdder successCount = new LongAdder();
+    private final LongAdder errorResponseCount = new LongAdder();
+    private final LongAdder failureCount = new LongAdder();
+    private final LongAdder totalConnections = new LongAdder();
+    private final LongAdder reconnections = new LongAdder();
+    private final ConcurrentHashMap<String, LongAdder> roomCounts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, LongAdder> typeCounts = new ConcurrentHashMap<>();
+    private final CsvWriter perMessageWriter;
 
-    private final List<Long> latencies = Collections.synchronizedList(new ArrayList<>());
-    
-    private static final long[] BUCKET_THRESHOLDS_MS = {1, 5, 10, 50, 100, 500, 1000, 5000};
-    private final ConcurrentHashMap<String, AtomicInteger> latencyBuckets = new ConcurrentHashMap<>();
+    private volatile long startTimeMs;
+    private volatile long endTimeMs;
 
-    public DetailedMetricsCollector() {
-        for (long threshold : BUCKET_THRESHOLDS_MS) {
-            latencyBuckets.put("<" + threshold + "ms", new AtomicInteger(0));
-        }
-        latencyBuckets.put(">=5000ms", new AtomicInteger(0));
-    }
-
-    public void recordSuccess() {
-        successfulMessages.incrementAndGet();
-    }
-
-    public void recordFailure() {
-        failedMessages.incrementAndGet();
+    public DetailedMetricsCollector(int totalMessages, CountDownLatch responseLatch, String csvPath) throws Exception {
+        this.responseLatch = responseLatch;
+        this.latenciesMs = new long[totalMessages];
+        this.ackTimesMs = new long[totalMessages];
+        this.perMessageWriter = new CsvWriter(csvPath,
+                "timestamp,messageType,latencyMs,statusCode,roomId");
     }
 
     public void recordConnection() {
-        totalConnections.incrementAndGet();
+        totalConnections.increment();
     }
 
     public void recordReconnection() {
-        reconnections.incrementAndGet();
+        reconnections.increment();
     }
 
-    public void recordLatency(long latencyNs) {
-        latencies.add(latencyNs);
-        long latencyMs = latencyNs / 1_000_000;
-        
-        boolean bucketed = false;
-        for (long threshold : BUCKET_THRESHOLDS_MS) {
-            if (latencyMs < threshold) {
-                latencyBuckets.get("<" + threshold + "ms").incrementAndGet();
-                bucketed = true;
-                break;
-            }
-        }
-        if (!bucketed) {
-            latencyBuckets.get(">=5000ms").incrementAndGet();
-        }
+    public void recordFailure() {
+        failureCount.increment();
+        responseLatch.countDown();
     }
 
     public void markStart() {
-        startTime.set(System.currentTimeMillis());
+        startTimeMs = System.currentTimeMillis();
     }
 
     public void markEnd() {
-        endTime.set(System.currentTimeMillis());
+        endTimeMs = System.currentTimeMillis();
     }
 
-    public int getSuccessfulMessages() {
-        return successfulMessages.get();
-    }
+    public void recordResponse(long sendTimeMs, ChatMessage.MessageType messageType,
+                               long latencyMs, int statusCode, String roomId,
+                               long ackTimeMs, String status) {
+        if (statusCode == 200) {
+            successCount.increment();
+        } else {
+            errorResponseCount.increment();
+        }
 
-    public int getFailedMessages() {
-        return failedMessages.get();
-    }
+        if (latencyMs >= 0) {
+            int idx = latencyIndex.getAndIncrement();
+            if (idx < latenciesMs.length) {
+                latenciesMs[idx] = latencyMs;
+            }
+        }
 
-    public int getTotalConnections() {
-        return totalConnections.get();
-    }
+        int ackIdx = ackIndex.getAndIncrement();
+        if (ackIdx < ackTimesMs.length) {
+            ackTimesMs[ackIdx] = ackTimeMs;
+        }
 
-    public int getReconnections() {
-        return reconnections.get();
+        if (roomId != null) {
+            roomCounts.computeIfAbsent(roomId, k -> new LongAdder()).increment();
+        } else {
+            roomCounts.computeIfAbsent("unknown", k -> new LongAdder()).increment();
+        }
+
+        String typeKey = messageType != null ? messageType.name() : "UNKNOWN";
+        typeCounts.computeIfAbsent(typeKey, k -> new LongAdder()).increment();
+
+        String timestampValue = sendTimeMs >= 0 ? String.valueOf(sendTimeMs) : "";
+        String line = String.format("%s,%s,%d,%d,%s",
+                timestampValue,
+                typeKey,
+                latencyMs,
+                statusCode,
+                roomId == null ? "" : roomId);
+        perMessageWriter.writeLine(line);
+
+        responseLatch.countDown();
     }
 
     public long getTotalRuntimeMs() {
-        return endTime.get() - startTime.get();
+        return endTimeMs - startTimeMs;
     }
 
     public double getThroughput() {
         long runtime = getTotalRuntimeMs();
-        if (runtime == 0) return 0;
-        return (successfulMessages.get() * 1000.0) / runtime;
+        if (runtime <= 0) {
+            return 0;
+        }
+        return (successCount.sum() * 1000.0) / runtime;
     }
 
     public void printSummary() {
         System.out.println("\n=== Performance Metrics ===");
-        System.out.println("Successful messages: " + getSuccessfulMessages());
-        System.out.println("Failed messages: " + getFailedMessages());
+        System.out.println("Successful messages: " + successCount.sum());
+        System.out.println("Error responses: " + errorResponseCount.sum());
+        System.out.println("Failed messages: " + failureCount.sum());
         System.out.println("Total runtime: " + getTotalRuntimeMs() + " ms");
         System.out.println("Throughput: " + String.format("%.2f", getThroughput()) + " messages/second");
-        System.out.println("Total connections: " + getTotalConnections());
-        System.out.println("Reconnections: " + getReconnections());
+        System.out.println("Total connections: " + totalConnections.sum());
+        System.out.println("Reconnections: " + reconnections.sum());
 
-        if (!latencies.isEmpty()) {
-            List<Long> sortedLatencies = new ArrayList<>(latencies);
-            Collections.sort(sortedLatencies);
-
-            long p50 = getPercentile(sortedLatencies, 50);
-            long p95 = getPercentile(sortedLatencies, 95);
-            long p99 = getPercentile(sortedLatencies, 99);
-            long min = sortedLatencies.get(0);
-            long max = sortedLatencies.get(sortedLatencies.size() - 1);
-            double avg = sortedLatencies.stream().mapToLong(Long::longValue).average().orElse(0.0);
-
-            System.out.println("\n=== Latency Statistics (ms) ===");
-            System.out.println("Min: " + String.format("%.2f", min / 1_000_000.0));
-            System.out.println("Avg: " + String.format("%.2f", avg / 1_000_000.0));
-            System.out.println("Max: " + String.format("%.2f", max / 1_000_000.0));
-            System.out.println("P50: " + String.format("%.2f", p50 / 1_000_000.0));
-            System.out.println("P95: " + String.format("%.2f", p95 / 1_000_000.0));
-            System.out.println("P99: " + String.format("%.2f", p99 / 1_000_000.0));
-
-            System.out.println("\n=== Latency Distribution (Buckets) ===");
-            for (long threshold : BUCKET_THRESHOLDS_MS) {
-                String key = "<" + threshold + "ms";
-                int count = latencyBuckets.get(key).get();
-                double percentage = (count * 100.0) / latencies.size();
-                System.out.println(String.format("%-10s: %6d (%.2f%%)", key, count, percentage));
-            }
-            int count = latencyBuckets.get(">=5000ms").get();
-            double percentage = (count * 100.0) / latencies.size();
-            System.out.println(String.format("%-10s: %6d (%.2f%%)", ">=5000ms", count, percentage));
-        }
+        printLatencyStats();
+        printRoomThroughput();
+        printMessageTypeDistribution();
     }
 
-    private long getPercentile(List<Long> sorted, int percentile) {
-        int idx = (int) Math.ceil(percentile / 100.0 * sorted.size()) - 1;
-        idx = Math.max(0, Math.min(sorted.size() - 1, idx));
-        return sorted.get(idx);
+    private void printLatencyStats() {
+        int count = Math.min(latencyIndex.get(), latenciesMs.length);
+        if (count == 0) {
+            System.out.println("Latency stats: no data");
+            return;
+        }
+
+        long[] copy = Arrays.copyOf(latenciesMs, count);
+        Arrays.sort(copy);
+
+        long min = copy[0];
+        long max = copy[count - 1];
+        double mean = Arrays.stream(copy).average().orElse(0);
+        long median = percentile(copy, 0.50);
+        long p95 = percentile(copy, 0.95);
+        long p99 = percentile(copy, 0.99);
+
+        System.out.println("Latency (ms) mean: " + String.format("%.2f", mean));
+        System.out.println("Latency (ms) median: " + median);
+        System.out.println("Latency (ms) p95: " + p95);
+        System.out.println("Latency (ms) p99: " + p99);
+        System.out.println("Latency (ms) min/max: " + min + "/" + max);
     }
 
-    public void exportToCsv(String filename) {
-        try (PrintWriter writer = new PrintWriter(new FileWriter(filename))) {
-            writer.println("metric,value");
-            writer.println("successful_messages," + getSuccessfulMessages());
-            writer.println("failed_messages," + getFailedMessages());
-            writer.println("total_runtime_ms," + getTotalRuntimeMs());
-            writer.println("throughput_msg_per_sec," + String.format("%.2f", getThroughput()));
-            writer.println("total_connections," + getTotalConnections());
-            writer.println("reconnections," + getReconnections());
-
-            if (!latencies.isEmpty()) {
-                List<Long> sortedLatencies = new ArrayList<>(latencies);
-                Collections.sort(sortedLatencies);
-
-                long p50 = getPercentile(sortedLatencies, 50);
-                long p95 = getPercentile(sortedLatencies, 95);
-                long p99 = getPercentile(sortedLatencies, 99);
-                long min = sortedLatencies.get(0);
-                long max = sortedLatencies.get(sortedLatencies.size() - 1);
-                double avg = sortedLatencies.stream().mapToLong(Long::longValue).average().orElse(0.0);
-
-                writer.println("latency_min_ms," + String.format("%.2f", min / 1_000_000.0));
-                writer.println("latency_avg_ms," + String.format("%.2f", avg / 1_000_000.0));
-                writer.println("latency_max_ms," + String.format("%.2f", max / 1_000_000.0));
-                writer.println("latency_p50_ms," + String.format("%.2f", p50 / 1_000_000.0));
-                writer.println("latency_p95_ms," + String.format("%.2f", p95 / 1_000_000.0));
-                writer.println("latency_p99_ms," + String.format("%.2f", p99 / 1_000_000.0));
-
-                writer.println("\nbucket,count,percentage");
-                for (long threshold : BUCKET_THRESHOLDS_MS) {
-                    String key = "<" + threshold + "ms";
-                    int count = latencyBuckets.get(key).get();
-                    double percentage = (count * 100.0) / latencies.size();
-                    writer.println(String.format("%s,%d,%.2f", key, count, percentage));
-                }
-                int count = latencyBuckets.get(">=5000ms").get();
-                double percentage = (count * 100.0) / latencies.size();
-                writer.println(String.format("%s,%d,%.2f", ">=5000ms", count, percentage));
-            }
-
-            System.out.println("Metrics exported to: " + filename);
-        } catch (IOException e) {
-            System.err.println("Failed to export metrics: " + e.getMessage());
+    private long percentile(long[] sorted, double p) {
+        if (sorted.length == 0) {
+            return 0;
         }
+        int idx = (int) Math.ceil(p * sorted.length) - 1;
+        idx = Math.max(0, Math.min(sorted.length - 1, idx));
+        return sorted[idx];
+    }
+
+    private void printRoomThroughput() {
+        long runtimeMs = getTotalRuntimeMs();
+        double runtimeSec = runtimeMs > 0 ? runtimeMs / 1000.0 : 1.0;
+        System.out.println("\nThroughput per room (messages/second):");
+        roomCounts.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(Comparator.naturalOrder()))
+                .forEach(entry -> {
+                    double tps = entry.getValue().sum() / runtimeSec;
+                    System.out.println("  room " + entry.getKey() + ": " + String.format("%.2f", tps));
+                });
+    }
+
+    private void printMessageTypeDistribution() {
+        long total = typeCounts.values().stream().mapToLong(LongAdder::sum).sum();
+        if (total == 0) {
+            System.out.println("\nMessage type distribution: no data");
+            return;
+        }
+        System.out.println("\nMessage type distribution:");
+        typeCounts.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(Comparator.naturalOrder()))
+                .forEach(entry -> {
+                    double pct = (entry.getValue().sum() * 100.0) / total;
+                    System.out.println("  " + entry.getKey() + ": " + entry.getValue().sum() +
+                            " (" + String.format("%.2f", pct) + "%)");
+                });
+    }
+
+    public void writeThroughputBuckets(String path) throws Exception {
+        int count = Math.min(ackIndex.get(), ackTimesMs.length);
+        if (count == 0) {
+            return;
+        }
+        long bucketSizeMs = 10_000L;
+        ConcurrentHashMap<Long, LongAdder> buckets = new ConcurrentHashMap<>();
+        for (int i = 0; i < count; i++) {
+            long ackTime = ackTimesMs[i];
+            if (ackTime <= 0) {
+                continue;
+            }
+            long bucketStart = ((ackTime - startTimeMs) / bucketSizeMs) * bucketSizeMs + startTimeMs;
+            buckets.computeIfAbsent(bucketStart, k -> new LongAdder()).increment();
+        }
+
+        CsvWriter writer = new CsvWriter(path, "bucketStartMs,throughput,count");
+        buckets.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey(Comparator.naturalOrder()))
+                .forEach(entry -> {
+                    long countInBucket = entry.getValue().sum();
+                    double throughput = countInBucket / 10.0;
+                    String line = entry.getKey() + "," + String.format("%.2f", throughput) + "," + countInBucket;
+                    writer.writeLine(line);
+                });
+        writer.close();
+    }
+
+    public void writeSummaryCsv(String path) throws Exception {
+        CsvWriter writer = new CsvWriter(path, "metric,value");
+        writer.writeLine("successful_messages," + successCount.sum());
+        writer.writeLine("error_responses," + errorResponseCount.sum());
+        writer.writeLine("failed_messages," + failureCount.sum());
+        writer.writeLine("total_runtime_ms," + getTotalRuntimeMs());
+        writer.writeLine("throughput_msg_per_sec," + String.format("%.2f", getThroughput()));
+        writer.writeLine("total_connections," + totalConnections.sum());
+        writer.writeLine("reconnections," + reconnections.sum());
+        writer.close();
+    }
+
+    public void close() {
+        perMessageWriter.close();
     }
 }

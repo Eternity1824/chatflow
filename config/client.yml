@@ -6,3 +6,7 @@ client:
   warmupMessagesPerThread: 1000
   connectionsPerRoom: 1
   responseWaitSeconds: 30
+  batchSize: 100
+  batchMaxBytes: 65536
+  flushIntervalMs: 2
+  flushSync: true

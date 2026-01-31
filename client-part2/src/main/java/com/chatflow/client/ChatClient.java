@@ -25,30 +25,48 @@ public class ChatClient {
     private final int warmupTotal;
     private final int mainPhaseMessages;
     private final int responseWaitSeconds;
+    private final int batchSize;
+    private final int batchMaxBytes;
+    private final int flushIntervalMs;
+    private final boolean flushSync;
+    private final int connectionsPerRoom;
 
     public ChatClient(ClientConfig.ClientSettings settings, String serverUrlOverride) {
         this.serverUrl = serverUrlOverride != null ? serverUrlOverride : settings.getServerUrl();
-        this.metrics = new DetailedMetricsCollector();
         this.totalMessages = settings.getTotalMessages();
         this.warmupThreads = settings.getWarmupThreads();
         this.warmupMessagesPerThread = settings.getWarmupMessagesPerThread();
         this.warmupTotal = warmupThreads * warmupMessagesPerThread;
         this.mainPhaseMessages = totalMessages - warmupTotal;
         this.responseWaitSeconds = settings.getResponseWaitSeconds();
+        this.batchSize = settings.getBatchSize();
+        this.batchMaxBytes = settings.getBatchMaxBytes();
+        this.flushIntervalMs = settings.getFlushIntervalMs();
+        this.flushSync = settings.isFlushSync();
+        this.connectionsPerRoom = settings.getConnectionsPerRoom();
         this.sharedEventLoopGroup = new NioEventLoopGroup();
         this.responseLatch = new CountDownLatch(totalMessages);
+        try {
+            this.metrics = new DetailedMetricsCollector(totalMessages, responseLatch, "results/metrics.csv");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize metrics collector", e);
+        }
         this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics,
-                responseLatch, settings.getConnectionsPerRoom());
+                settings.getConnectionsPerRoom());
     }
 
     public void run() throws InterruptedException {
         logger.info("Starting ChatFlow Client");
         logger.info("Server URL: {}", serverUrl);
         logger.info("Total messages to send: {}", totalMessages);
+        logger.info("Config: warmupThreads={}, warmupMessagesPerThread={}, connectionsPerRoom={}",
+                warmupThreads, warmupMessagesPerThread, connectionsPerRoom);
+        logger.info("Config: batchSize={}, batchMaxBytes={}, flushIntervalMs={}, flushSync={}",
+                batchSize, batchMaxBytes, flushIntervalMs, flushSync);
 
-        BlockingQueue<String> messageQueue = new ArrayBlockingQueue<>(100_000);
+        BlockingQueue<MessageTemplate> messageQueue = new ArrayBlockingQueue<>(100_000);
 
-        Thread generatorThread = new Thread(new MessageGenerator(messageQueue, totalMessages));
+        Thread generatorThread = new Thread(new MessageGenerator(messageQueue, totalMessages, 20));
         generatorThread.start();
 
         metrics.markStart();
@@ -81,24 +99,32 @@ public class ChatClient {
 
         metrics.markEnd();
         metrics.printSummary();
-        metrics.exportToCsv("metrics_output.csv");
+        try {
+            metrics.writeThroughputBuckets("results/throughput_10s.csv");
+            metrics.writeSummaryCsv("results/summary.csv");
+        } catch (Exception e) {
+            logger.warn("Failed to write metrics outputs", e);
+        } finally {
+            metrics.close();
+        }
         
         connectionPool.closeAll();
         sharedEventLoopGroup.shutdownGracefully();
     }
 
-    private void runPhase(BlockingQueue<String> queue, int numThreads, int messagesPerThread) 
+    private void runPhase(BlockingQueue<MessageTemplate> queue, int numThreads, int messagesPerThread)
             throws InterruptedException {
         runPhase(queue, numThreads, messagesPerThread, 0);
     }
 
-    private void runPhase(BlockingQueue<String> queue, int numThreads, 
+    private void runPhase(BlockingQueue<MessageTemplate> queue, int numThreads,
                          int messagesPerThread, int extraMessages) throws InterruptedException {
         List<Thread> threads = new ArrayList<>();
 
         for (int i = 0; i < numThreads; i++) {
             int messagesToSend = messagesPerThread + (i < extraMessages ? 1 : 0);
-            Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool));
+            Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool, metrics,
+                    batchSize, batchMaxBytes, flushIntervalMs, flushSync));
             threads.add(thread);
             thread.start();
         }

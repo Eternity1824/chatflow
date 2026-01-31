@@ -18,7 +18,6 @@ import io.netty.util.concurrent.Promise;
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -29,24 +28,24 @@ public class ConnectionPool {
     private final ConcurrentHashMap<String, Channel> roomChannels;
     private final ConcurrentHashMap<String, CompletableFuture<Channel>> inFlightConnections;
     private final ConcurrentHashMap<String, AtomicInteger> roomCounters;
+    private final ConcurrentHashMap<String, String> channelRoomMap;
     private final String serverUrl;
     private final EventLoopGroup eventLoopGroup;
     private final DetailedMetricsCollector metrics;
     private final Bootstrap bootstrap;
-    private final CountDownLatch responseLatch;
     private final int connectionsPerRoom;
     private static final long HANDSHAKE_TIMEOUT_SECONDS = 10;
 
     public ConnectionPool(String serverUrl, EventLoopGroup eventLoopGroup, DetailedMetricsCollector metrics,
-                          CountDownLatch responseLatch, int connectionsPerRoom) {
+                          int connectionsPerRoom) {
         this.serverUrl = serverUrl;
         this.eventLoopGroup = eventLoopGroup;
         this.metrics = metrics;
-        this.responseLatch = responseLatch;
         this.connectionsPerRoom = Math.max(1, connectionsPerRoom);
         this.roomChannels = new ConcurrentHashMap<>();
         this.inFlightConnections = new ConcurrentHashMap<>();
         this.roomCounters = new ConcurrentHashMap<>();
+        this.channelRoomMap = new ConcurrentHashMap<>();
         this.bootstrap = createBootstrap();
     }
 
@@ -82,6 +81,7 @@ public class ConnectionPool {
             try {
                 Channel channel = connect(roomId);
                 roomChannels.put(key, channel);
+                channelRoomMap.put(channel.id().asShortText(), roomId);
                 metrics.recordConnection();
                 inFlight.complete(channel);
             } catch (Exception e) {
@@ -138,7 +138,7 @@ public class ConnectionPool {
                                 new DefaultHttpHeaders()));
                 pipeline.addLast(wsHandler);
                 pipeline.addLast(new WebSocketHandshakeHandler(handshakePromise));
-                pipeline.addLast(new WebSocketClientHandler(metrics, responseLatch));
+                pipeline.addLast(new WebSocketClientHandler(metrics, ConnectionPool.this));
             }
         });
 
@@ -157,10 +157,11 @@ public class ConnectionPool {
     }
 
     public void removeConnection(String roomId) {
-        String prefix = roomId + "#";
+        String prefix = roomId + "-";
         roomChannels.forEach((key, channel) -> {
             if (key.startsWith(prefix)) {
                 if (roomChannels.remove(key, channel)) {
+                    channelRoomMap.remove(channel.id().asShortText());
                     channel.close();
                 }
             }
@@ -182,11 +183,19 @@ public class ConnectionPool {
         }
         roomChannels.clear();
         roomCounters.clear();
+        channelRoomMap.clear();
         for (CompletableFuture<Channel> inFlight : inFlightConnections.values()) {
             if (inFlight != null) {
                 inFlight.cancel(false);
             }
         }
         inFlightConnections.clear();
+    }
+
+    public String getRoomIdForChannel(Channel channel) {
+        if (channel == null) {
+            return null;
+        }
+        return channelRoomMap.get(channel.id().asShortText());
     }
 }

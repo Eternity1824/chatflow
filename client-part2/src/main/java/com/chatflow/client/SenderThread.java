@@ -1,6 +1,7 @@
 package com.chatflow.client;
 
 import com.chatflow.protocol.ChatMessage;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -8,6 +9,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -17,9 +19,7 @@ public class SenderThread implements Runnable {
     private static final int MAX_RETRIES = 5;
     private static final int INITIAL_BACKOFF_MS = 100;
 
-    private static final int BATCH_SIZE = Integer.getInteger("chatflow.batch.size", 100);
-    private static final int MAX_BUFFERED_BYTES = Integer.getInteger("chatflow.batch.max.bytes", 65536);
-    private static final boolean SYNC_ON_FLUSH = Boolean.getBoolean("chatflow.flush.sync");
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final class BatchState {
         int pendingCount;
@@ -28,15 +28,28 @@ public class SenderThread implements Runnable {
         ChannelFuture lastWriteFuture;
     }
 
-    private final BlockingQueue<String> messageQueue;
+    private final BlockingQueue<MessageTemplate> messageQueue;
     private final int messagesToSend;
     private final ConnectionPool connectionPool;
+    private final DetailedMetricsCollector metrics;
+    private final int batchSize;
+    private final int maxBufferedBytes;
+    private final long flushIntervalNs;
+    private final boolean syncOnFlush;
 
-    public SenderThread(BlockingQueue<String> messageQueue, 
-                       int messagesToSend, ConnectionPool connectionPool) {
+    public SenderThread(BlockingQueue<MessageTemplate> messageQueue,
+                       int messagesToSend, ConnectionPool connectionPool,
+                       DetailedMetricsCollector metrics,
+                       int batchSize, int maxBufferedBytes,
+                       int flushIntervalMs, boolean syncOnFlush) {
         this.messageQueue = messageQueue;
         this.messagesToSend = messagesToSend;
         this.connectionPool = connectionPool;
+        this.metrics = metrics;
+        this.batchSize = Math.max(1, batchSize);
+        this.maxBufferedBytes = Math.max(1024, maxBufferedBytes);
+        this.flushIntervalNs = Math.max(0, flushIntervalMs) * 1_000_000L;
+        this.syncOnFlush = syncOnFlush;
     }
 
     @Override
@@ -45,11 +58,8 @@ public class SenderThread implements Runnable {
         try {
             int sentCount = 0;
             while (sentCount < messagesToSend) {
-                String messageWithRoom = messageQueue.take();
-
-                String[] parts = messageWithRoom.split("\\|");
-                String jsonMessage = parts[0];
-                String roomId = parts.length > 1 ? parts[1] : "1";
+                MessageTemplate template = messageQueue.take();
+                String roomId = template.getRoomId();
 
                 boolean sent = false;
                 for (int retry = 0; retry < MAX_RETRIES && !sent; retry++) {
@@ -65,17 +75,27 @@ public class SenderThread implements Runnable {
                                 return s;
                             });
 
+                            ChatMessage message = new ChatMessage(
+                                    template.getUserId(),
+                                    template.getUsername(),
+                                    template.getMessage(),
+                                    Instant.now().toString(),
+                                    template.getMessageType()
+                            );
+                            String jsonMessage = objectMapper.writeValueAsString(message);
                             ChannelFuture writeFuture = channel.write(new TextWebSocketFrame(jsonMessage));
                             state.lastWriteFuture = writeFuture;
                             state.pendingCount++;
                             state.pendingBytes += jsonMessage.length();
-                            boolean countFlush = state.pendingCount >= BATCH_SIZE;
-                            boolean bytesFlush = state.pendingBytes >= MAX_BUFFERED_BYTES;
+                            boolean countFlush = state.pendingCount >= batchSize;
+                            boolean bytesFlush = state.pendingBytes >= maxBufferedBytes;
                             boolean nonWritableFlush = !channel.isWritable();
+                            boolean timeFlush = flushIntervalNs > 0 &&
+                                    (System.nanoTime() - state.lastFlushNs) > flushIntervalNs;
 
-                            if (countFlush || bytesFlush || nonWritableFlush) {
+                            if (countFlush || bytesFlush || nonWritableFlush || timeFlush) {
                                 channel.flush();
-                                if (SYNC_ON_FLUSH && state.lastWriteFuture != null) {
+                                if (syncOnFlush && state.lastWriteFuture != null) {
                                     state.lastWriteFuture.sync();
                                 }
                                 state.pendingCount = 0;
@@ -107,8 +127,28 @@ public class SenderThread implements Runnable {
                     MDC.put("roomId", roomId);
                     try {
                         logger.error("Failed to send message after {} retries", MAX_RETRIES);
+                        metrics.recordFailure();
                     } finally {
                         MDC.remove("roomId");
+                    }
+                }
+                sentCount++;
+            }
+            
+            // Final flush for all rooms with pending messages
+            for (Map.Entry<String, BatchState> entry : batches.entrySet()) {
+                String roomId = entry.getKey();
+                BatchState state = entry.getValue();
+                if (state.pendingCount > 0) {
+                    try {
+                        Channel channel = connectionPool.getOrCreateConnection(roomId);
+                        channel.flush();
+                        if (syncOnFlush && state.lastWriteFuture != null) {
+                            state.lastWriteFuture.sync();
+                        }
+                        logger.debug("Final flush for room {}: {} messages", roomId, state.pendingCount);
+                    } catch (Exception e) {
+                        logger.warn("Failed to final flush room {}", roomId, e);
                     }
                 }
             }

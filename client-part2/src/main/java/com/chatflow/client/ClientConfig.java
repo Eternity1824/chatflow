@@ -40,6 +40,10 @@ public class ClientConfig {
         private int warmupMessagesPerThread = 1000;
         private int connectionsPerRoom = 1;
         private int responseWaitSeconds = 30;
+        private int batchSize = 100;
+        private int batchMaxBytes = 65536;
+        private int flushIntervalMs = 2;
+        private boolean flushSync = false;
 
         public String getServerUrl() {
             return serverUrl;
@@ -63,6 +67,22 @@ public class ClientConfig {
 
         public int getResponseWaitSeconds() {
             return responseWaitSeconds;
+        }
+
+        public int getBatchSize() {
+            return batchSize;
+        }
+
+        public int getBatchMaxBytes() {
+            return batchMaxBytes;
+        }
+
+        public int getFlushIntervalMs() {
+            return flushIntervalMs;
+        }
+
+        public boolean isFlushSync() {
+            return flushSync;
         }
     }
 }
