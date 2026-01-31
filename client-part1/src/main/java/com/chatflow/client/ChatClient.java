@@ -13,51 +13,59 @@ import org.slf4j.LoggerFactory;
 
 public class ChatClient {
     private static final Logger logger = LoggerFactory.getLogger(ChatClient.class);
-    private static final int TOTAL_MESSAGES = 500_000;
-    private static final int WARMUP_THREADS = 32;
-    private static final int WARMUP_MESSAGES_PER_THREAD = 1000;
-    private static final int WARMUP_TOTAL = WARMUP_THREADS * WARMUP_MESSAGES_PER_THREAD;
-    private static final int MAIN_PHASE_MESSAGES = TOTAL_MESSAGES - WARMUP_TOTAL;
 
     private final String serverUrl;
     private final MetricsCollector metrics;
     private final EventLoopGroup sharedEventLoopGroup;
     private final ConnectionPool connectionPool;
     private final CountDownLatch responseLatch;
+    private final int totalMessages;
+    private final int warmupThreads;
+    private final int warmupMessagesPerThread;
+    private final int warmupTotal;
+    private final int mainPhaseMessages;
+    private final int responseWaitSeconds;
 
-    public ChatClient(String serverUrl) {
-        this.serverUrl = serverUrl;
+    public ChatClient(ClientConfig.ClientSettings settings, String serverUrlOverride) {
+        this.serverUrl = serverUrlOverride != null ? serverUrlOverride : settings.getServerUrl();
         this.metrics = new MetricsCollector();
+        this.totalMessages = settings.getTotalMessages();
+        this.warmupThreads = settings.getWarmupThreads();
+        this.warmupMessagesPerThread = settings.getWarmupMessagesPerThread();
+        this.warmupTotal = warmupThreads * warmupMessagesPerThread;
+        this.mainPhaseMessages = totalMessages - warmupTotal;
+        this.responseWaitSeconds = settings.getResponseWaitSeconds();
         this.sharedEventLoopGroup = new NioEventLoopGroup();
-        this.responseLatch = new CountDownLatch(TOTAL_MESSAGES);
-        this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics, responseLatch);
+        this.responseLatch = new CountDownLatch(totalMessages);
+        this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics,
+                responseLatch, settings.getConnectionsPerRoom());
     }
 
     public void run() throws InterruptedException {
         logger.info("Starting ChatFlow Client");
         logger.info("Server URL: {}", serverUrl);
-        logger.info("Total messages to send: {}", TOTAL_MESSAGES);
+        logger.info("Total messages to send: {}", totalMessages);
 
         BlockingQueue<String> messageQueue = new ArrayBlockingQueue<>(100_000);
 
-        Thread generatorThread = new Thread(new MessageGenerator(messageQueue, TOTAL_MESSAGES));
+        Thread generatorThread = new Thread(new MessageGenerator(messageQueue, totalMessages));
         generatorThread.start();
 
         metrics.markStart();
 
         logger.info("=== Warmup Phase ===");
-        logger.info("Starting {} threads, each sending {} messages", WARMUP_THREADS, WARMUP_MESSAGES_PER_THREAD);
+        logger.info("Starting {} threads, each sending {} messages", warmupThreads, warmupMessagesPerThread);
         long warmupStart = System.currentTimeMillis();
-        runPhase(messageQueue, WARMUP_THREADS, WARMUP_MESSAGES_PER_THREAD);
+        runPhase(messageQueue, warmupThreads, warmupMessagesPerThread);
         long warmupEnd = System.currentTimeMillis();
         logger.info("Warmup completed in {} ms", (warmupEnd - warmupStart));
 
         logger.info("=== Main Phase ===");
         int mainThreads = calculateOptimalThreads();
-        int messagesPerThread = MAIN_PHASE_MESSAGES / mainThreads;
-        int remainder = MAIN_PHASE_MESSAGES % mainThreads;
+        int messagesPerThread = mainPhaseMessages / mainThreads;
+        int remainder = mainPhaseMessages % mainThreads;
         
-        logger.info("Starting {} threads for remaining {} messages", mainThreads, MAIN_PHASE_MESSAGES);
+        logger.info("Starting {} threads for remaining {} messages", mainThreads, mainPhaseMessages);
         long mainStart = System.currentTimeMillis();
         runPhase(messageQueue, mainThreads, messagesPerThread, remainder);
         long mainEnd = System.currentTimeMillis();
@@ -66,7 +74,7 @@ public class ChatClient {
         generatorThread.join();
 
         logger.info("Waiting for server responses...");
-        boolean allResponses = responseLatch.await(30, TimeUnit.SECONDS);
+        boolean allResponses = responseLatch.await(responseWaitSeconds, TimeUnit.SECONDS);
         if (!allResponses) {
             logger.warn("Timed out waiting for responses. Remaining: {}", responseLatch.getCount());
         }
@@ -105,12 +113,22 @@ public class ChatClient {
     }
 
     public static void main(String[] args) throws InterruptedException {
-        String serverUrl = "ws://localhost:8080/chat";
-        if (args.length > 0) {
-            serverUrl = args[0];
+        String configPath = System.getenv("CHATFLOW_CONFIG");
+        String serverUrlOverride = null;
+        for (String arg : args) {
+            if (arg.startsWith("--config=")) {
+                configPath = arg.substring("--config=".length());
+            } else if (!arg.startsWith("--")) {
+                serverUrlOverride = arg;
+            }
         }
 
-        ChatClient client = new ChatClient(serverUrl);
+        if (configPath == null || configPath.isBlank()) {
+            configPath = "config/client.yml";
+        }
+
+        ClientConfig config = ClientConfig.load(configPath);
+        ChatClient client = new ChatClient(config.getClient(), serverUrlOverride);
         client.run();
     }
 }

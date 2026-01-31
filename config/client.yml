@@ -1,0 +1,8 @@
+jvmOpts: "-Xms512m -Xmx1g"
+client:
+  serverUrl: "ws://localhost:8080/chat"
+  totalMessages: 500000
+  warmupThreads: 32
+  warmupMessagesPerThread: 1000
+  connectionsPerRoom: 1
+  responseWaitSeconds: 30

@@ -13,11 +13,13 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.time.Instant;
+import io.netty.util.AttributeKey;
 
 public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final Logger logger = LoggerFactory.getLogger(WebSocketChatHandler.class);
+    private static final AttributeKey<Boolean> JOINED_ATTR = AttributeKey.valueOf("joined");
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) throws Exception {
@@ -35,7 +37,7 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
         MDC.put("channelId", channelId);
         try {
             String jsonText = ((TextWebSocketFrame) frame).text();
-            logger.info("Received (roomId={}): {}", roomId, jsonText);
+            // logger.info("Received (roomId={}): {}", roomId, jsonText);
 
             try {
                 // 1. Parse JSON
@@ -55,12 +57,26 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                     return;
                 }
 
+                // 3b. Enforce JOIN before TEXT messages
+                boolean joined = Boolean.TRUE.equals(ctx.channel().attr(JOINED_ATTR).get());
+                if (message.getMessageType() == ChatMessage.MessageType.JOIN) {
+                    ctx.channel().attr(JOINED_ATTR).set(true);
+                } else if (message.getMessageType() == ChatMessage.MessageType.LEAVE) {
+                    ctx.channel().attr(JOINED_ATTR).set(false);
+                } else if (message.getMessageType() == ChatMessage.MessageType.TEXT && !joined) {
+                    ServerResponse errorResponse = ServerResponse.error(
+                            "User must JOIN before sending TEXT", serverTimestamp);
+                    String responseJson = objectMapper.writeValueAsString(errorResponse);
+                    ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+                    return;
+                }
+
                 // 4. Valid message - echo back with server timestamp
                 ServerResponse successResponse = ServerResponse.success(message, serverTimestamp);
                 String responseJson = objectMapper.writeValueAsString(successResponse);
                 ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
 
-                logger.info("Validated and echoed (roomId={}): {}", roomId, message);
+                // logger.info("Validated and echoed (roomId={}): {}", roomId, message);
 
             } catch (Exception e) {
                 // 5. Invalid JSON format

@@ -17,8 +17,8 @@ import io.netty.util.concurrent.Promise;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,21 +26,25 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ConnectionPool {
     private final ConcurrentHashMap<String, Channel> roomChannels;
     private final ConcurrentHashMap<String, CompletableFuture<Channel>> inFlightConnections;
+    private final ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger> roomCounters;
     private final String serverUrl;
     private final EventLoopGroup eventLoopGroup;
     private final MetricsCollector metrics;
     private final Bootstrap bootstrap;
     private final java.util.concurrent.CountDownLatch responseLatch;
+    private final int connectionsPerRoom;
     private static final long HANDSHAKE_TIMEOUT_SECONDS = 10;
 
     public ConnectionPool(String serverUrl, EventLoopGroup eventLoopGroup, MetricsCollector metrics,
-                          java.util.concurrent.CountDownLatch responseLatch) {
+                          java.util.concurrent.CountDownLatch responseLatch, int connectionsPerRoom) {
         this.serverUrl = serverUrl;
         this.eventLoopGroup = eventLoopGroup;
         this.metrics = metrics;
         this.responseLatch = responseLatch;
+        this.connectionsPerRoom = Math.max(1, connectionsPerRoom);
         this.roomChannels = new ConcurrentHashMap<>();
         this.inFlightConnections = new ConcurrentHashMap<>();
+        this.roomCounters = new ConcurrentHashMap<>();
         this.bootstrap = createBootstrap();
     }
 
@@ -55,38 +59,42 @@ public class ConnectionPool {
             throw new InterruptedException();
         }
 
-        Channel existing = roomChannels.get(roomId);
+        int index = roomCounters.computeIfAbsent(roomId, key -> new java.util.concurrent.atomic.AtomicInteger())
+                .getAndIncrement();
+        String key = connectionKey(roomId, index % connectionsPerRoom);
+
+        Channel existing = roomChannels.get(key);
         if (existing != null && existing.isActive()) {
             return existing;
         }
 
         if (existing != null) {
             metrics.recordReconnection();
-            roomChannels.remove(roomId, existing);
+            roomChannels.remove(key, existing);
         }
 
         CompletableFuture<Channel> newFuture = new CompletableFuture<>();
-        CompletableFuture<Channel> inFlight = inFlightConnections.putIfAbsent(roomId, newFuture);
+        CompletableFuture<Channel> inFlight = inFlightConnections.putIfAbsent(key, newFuture);
         if (inFlight == null) {
             inFlight = newFuture;
             try {
                 Channel channel = connect(roomId);
-                roomChannels.put(roomId, channel);
+                roomChannels.put(key, channel);
                 metrics.recordConnection();
                 inFlight.complete(channel);
             } catch (Exception e) {
                 inFlight.completeExceptionally(e);
             } finally {
-                inFlightConnections.remove(roomId, inFlight);
+                inFlightConnections.remove(key, inFlight);
             }
         }
 
         try {
             return inFlight.get(HANDSHAKE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            inFlightConnections.remove(roomId, inFlight);
+            inFlightConnections.remove(key, inFlight);
             throw new IllegalStateException("Handshake timed out for roomId=" + roomId, e);
-        } catch (CompletionException e) {
+        } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof Exception) {
                 throw (Exception) cause;
@@ -102,7 +110,7 @@ public class ConnectionPool {
     }
 
     Channel connect(String roomId) throws Exception {
-        URI uri = new URI(serverUrl + "?roomId=" + roomId);
+        URI uri = new URI(serverUrl + "/" + roomId);
         String host = uri.getHost();
         int port = uri.getPort() > 0 ? uri.getPort() : 80;
 
@@ -143,14 +151,21 @@ public class ConnectionPool {
     }
 
     public void removeConnection(String roomId) {
-        Channel channel = roomChannels.remove(roomId);
-        if (channel != null) {
-            channel.close();
-        }
-        CompletableFuture<Channel> inFlight = inFlightConnections.remove(roomId);
-        if (inFlight != null) {
-            inFlight.cancel(false);
-        }
+        String prefix = roomId + "#";
+        roomChannels.forEach((key, channel) -> {
+            if (key.startsWith(prefix)) {
+                if (roomChannels.remove(key, channel)) {
+                    channel.close();
+                }
+            }
+        });
+        inFlightConnections.forEach((key, inFlight) -> {
+            if (key.startsWith(prefix)) {
+                if (inFlightConnections.remove(key, inFlight)) {
+                    inFlight.cancel(false);
+                }
+            }
+        });
     }
 
     public void closeAll() {
@@ -160,11 +175,16 @@ public class ConnectionPool {
             }
         }
         roomChannels.clear();
+        roomCounters.clear();
         for (CompletableFuture<Channel> inFlight : inFlightConnections.values()) {
             if (inFlight != null) {
                 inFlight.cancel(false);
             }
         }
         inFlightConnections.clear();
+    }
+
+    private String connectionKey(String roomId, int index) {
+        return roomId + "#" + index;
     }
 }

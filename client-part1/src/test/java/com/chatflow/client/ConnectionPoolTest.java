@@ -37,7 +37,8 @@ public class ConnectionPoolTest {
         CountDownLatch connectEntered = new CountDownLatch(1);
         CountDownLatch allowConnectReturn = new CountDownLatch(1);
 
-        ConnectionPool pool = new ConnectionPool("ws://localhost:8080/chat", group, metrics) {
+        ConnectionPool pool = new ConnectionPool("ws://localhost:8080/chat", group, metrics,
+                new CountDownLatch(0), 1) {
             @Override
             Channel connect(String roomId) throws Exception {
                 connectCalls.incrementAndGet();

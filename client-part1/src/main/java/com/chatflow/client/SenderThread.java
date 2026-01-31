@@ -1,17 +1,31 @@
 package com.chatflow.client;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 
 public class SenderThread implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(SenderThread.class);
     private static final int MAX_RETRIES = 5;
     private static final int INITIAL_BACKOFF_MS = 100;
+
+    private static final int BATCH_SIZE = Integer.getInteger("chatflow.batch.size", 100);
+    private static final int MAX_BUFFERED_BYTES = Integer.getInteger("chatflow.batch.max.bytes", 65536);
+    private static final boolean SYNC_ON_FLUSH = Boolean.getBoolean("chatflow.flush.sync");
+
+    private static final class BatchState {
+        int pendingCount;
+        int pendingBytes;
+        long lastFlushNs;
+        ChannelFuture lastWriteFuture;
+    }
 
     private final BlockingQueue<String> messageQueue;
     private final int messagesToSend;
@@ -26,9 +40,12 @@ public class SenderThread implements Runnable {
 
     @Override
     public void run() {
+        Map<String, BatchState> batches = new HashMap<>();
         try {
-            for (int i = 0; i < messagesToSend; i++) {
+            int sentCount = 0;
+            while (sentCount < messagesToSend) {
                 String messageWithRoom = messageQueue.take();
+
                 String[] parts = messageWithRoom.split("\\|");
                 String jsonMessage = parts[0];
                 String roomId = parts.length > 1 ? parts[1] : "1";
@@ -41,7 +58,29 @@ public class SenderThread implements Runnable {
                         MDC.put("roomId", roomId);
                         MDC.put("channelId", channelId);
                         try {
-                            channel.writeAndFlush(new TextWebSocketFrame(jsonMessage)).sync();
+                            BatchState state = batches.computeIfAbsent(roomId, k -> {
+                                BatchState s = new BatchState();
+                                s.lastFlushNs = System.nanoTime();
+                                return s;
+                            });
+
+                            ChannelFuture writeFuture = channel.write(new TextWebSocketFrame(jsonMessage));
+                            state.lastWriteFuture = writeFuture;
+                            state.pendingCount++;
+                            state.pendingBytes += jsonMessage.length();
+                            boolean countFlush = state.pendingCount >= BATCH_SIZE;
+                            boolean bytesFlush = state.pendingBytes >= MAX_BUFFERED_BYTES;
+                            boolean nonWritableFlush = !channel.isWritable();
+
+                            if (countFlush || bytesFlush || nonWritableFlush) {
+                                channel.flush();
+                                if (SYNC_ON_FLUSH && state.lastWriteFuture != null) {
+                                    state.lastWriteFuture.sync();
+                                }
+                                state.pendingCount = 0;
+                                state.pendingBytes = 0;
+                                state.lastFlushNs = System.nanoTime();
+                            }
                             sent = true;
                         } finally {
                             MDC.remove("roomId");
@@ -71,10 +110,42 @@ public class SenderThread implements Runnable {
                         MDC.remove("roomId");
                     }
                 }
+
+                sentCount++;
             }
         } catch (Exception e) {
             logger.error("Sender thread error", e);
+        } finally {
+            flushAll(batches);
         }
     }
 
+    private void flushAll(Map<String, BatchState> batches) {
+        for (Map.Entry<String, BatchState> entry : batches.entrySet()) {
+            String roomId = entry.getKey();
+            BatchState state = entry.getValue();
+            if (state == null || state.pendingCount == 0) {
+                continue;
+            }
+            try {
+                Channel channel = connectionPool.getOrCreateConnection(roomId);
+                channel.flush();
+                if (SYNC_ON_FLUSH && state.lastWriteFuture != null) {
+                    state.lastWriteFuture.sync();
+                }
+            } catch (Exception e) {
+                MDC.put("roomId", roomId);
+                try {
+                    logger.warn("Flush failed", e);
+                } finally {
+                    MDC.remove("roomId");
+                }
+                connectionPool.removeConnection(roomId);
+            } finally {
+                state.pendingCount = 0;
+                state.pendingBytes = 0;
+                state.lastFlushNs = System.nanoTime();
+            }
+        }
+    }
 }
