@@ -47,6 +47,8 @@ public class ClientConfig {
         private int batchMaxBytes = 65536;
         private int flushIntervalMs = 2;
         private boolean flushSync = false;
+        private int mainThreads = 0;
+        private int targetQps = 0;
 
         public String getServerUrl() {
             return serverUrl;
@@ -98,6 +100,14 @@ public class ClientConfig {
 
         public boolean isFlushSync() {
             return flushSync;
+        }
+
+        public int getMainThreads() {
+            return mainThreads;
+        }
+
+        public int getTargetQps() {
+            return targetQps;
         }
     }
 }

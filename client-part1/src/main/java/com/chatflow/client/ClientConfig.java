@@ -40,6 +40,8 @@ public class ClientConfig {
         private int warmupMessagesPerThread = 1000;
         private int connectionsPerRoom = 1;
         private int responseWaitSeconds = 30;
+        private int mainThreads = 0;
+        private int targetQps = 0;
 
         public String getServerUrl() {
             return serverUrl;
@@ -63,6 +65,14 @@ public class ClientConfig {
 
         public int getResponseWaitSeconds() {
             return responseWaitSeconds;
+        }
+
+        public int getMainThreads() {
+            return mainThreads;
+        }
+
+        public int getTargetQps() {
+            return targetQps;
         }
     }
 }

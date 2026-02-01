@@ -1,5 +1,6 @@
 package com.chatflow.client;
 
+import com.chatflow.util.RateLimiter;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -30,12 +31,15 @@ public class SenderThread implements Runnable {
     private final BlockingQueue<String> messageQueue;
     private final int messagesToSend;
     private final ConnectionPool connectionPool;
+    private final RateLimiter rateLimiter;
 
     public SenderThread(BlockingQueue<String> messageQueue, 
-                       int messagesToSend, ConnectionPool connectionPool) {
+                       int messagesToSend, ConnectionPool connectionPool,
+                       RateLimiter rateLimiter) {
         this.messageQueue = messageQueue;
         this.messagesToSend = messagesToSend;
         this.connectionPool = connectionPool;
+        this.rateLimiter = rateLimiter;
     }
 
     @Override
@@ -49,6 +53,9 @@ public class SenderThread implements Runnable {
                 String[] parts = messageWithRoom.split("\\|");
                 String jsonMessage = parts[0];
                 String roomId = parts.length > 1 ? parts[1] : "1";
+                if (rateLimiter != null) {
+                    rateLimiter.acquire();
+                }
 
                 boolean sent = false;
                 for (int retry = 0; retry < MAX_RETRIES && !sent; retry++) {

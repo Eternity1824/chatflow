@@ -1,5 +1,6 @@
 package com.chatflow.client;
 
+import com.chatflow.util.RateLimiter;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import java.util.concurrent.CountDownLatch;
@@ -25,6 +26,9 @@ public class ChatClient {
     private final int warmupTotal;
     private final int mainPhaseMessages;
     private final int responseWaitSeconds;
+    private final int mainThreadsOverride;
+    private final int targetQps;
+    private final RateLimiter rateLimiter;
 
     public ChatClient(ClientConfig.ClientSettings settings, String serverUrlOverride) {
         this.serverUrl = serverUrlOverride != null ? serverUrlOverride : settings.getServerUrl();
@@ -35,6 +39,9 @@ public class ChatClient {
         this.warmupTotal = warmupThreads * warmupMessagesPerThread;
         this.mainPhaseMessages = totalMessages - warmupTotal;
         this.responseWaitSeconds = settings.getResponseWaitSeconds();
+        this.mainThreadsOverride = settings.getMainThreads();
+        this.targetQps = settings.getTargetQps();
+        this.rateLimiter = targetQps > 0 ? RateLimiter.create(targetQps) : null;
         this.sharedEventLoopGroup = new NioEventLoopGroup();
         this.responseLatch = new CountDownLatch(totalMessages);
         this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics,
@@ -45,6 +52,9 @@ public class ChatClient {
         logger.info("Starting ChatFlow Client");
         logger.info("Server URL: {}", serverUrl);
         logger.info("Total messages to send: {}", totalMessages);
+        String mainThreadsLabel = mainThreadsOverride > 0 ? String.valueOf(mainThreadsOverride) : "auto";
+        String targetQpsLabel = targetQps > 0 ? String.valueOf(targetQps) : "unlimited";
+        logger.info("Config: mainThreads={}, targetQps={}", mainThreadsLabel, targetQpsLabel);
 
         BlockingQueue<String> messageQueue = new ArrayBlockingQueue<>(100_000);
 
@@ -61,7 +71,10 @@ public class ChatClient {
         logger.info("Warmup completed in {} ms", (warmupEnd - warmupStart));
 
         logger.info("=== Main Phase ===");
-        int mainThreads = calculateOptimalThreads();
+        int mainThreads = mainThreadsOverride > 0 ? mainThreadsOverride : calculateOptimalThreads();
+        if (mainThreads < 1) {
+            mainThreads = 1;
+        }
         int messagesPerThread = mainPhaseMessages / mainThreads;
         int remainder = mainPhaseMessages % mainThreads;
         
@@ -97,7 +110,7 @@ public class ChatClient {
 
         for (int i = 0; i < numThreads; i++) {
             int messagesToSend = messagesPerThread + (i < extraMessages ? 1 : 0);
-            Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool));
+            Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool, rateLimiter));
             threads.add(thread);
             thread.start();
         }

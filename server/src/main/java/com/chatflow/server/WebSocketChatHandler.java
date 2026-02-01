@@ -49,7 +49,7 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                     ServerResponse errorResponse = ServerResponse.error(
                             result.getErrorMessage(), serverTimestamp);
                     String responseJson = objectMapper.writeValueAsString(errorResponse);
-                    ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+                    ctx.write(new TextWebSocketFrame(responseJson));
                     return;
                 }
 
@@ -63,14 +63,14 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                     ServerResponse errorResponse = ServerResponse.error(
                             "User must JOIN before sending TEXT", serverTimestamp);
                     String responseJson = objectMapper.writeValueAsString(errorResponse);
-                    ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+                    ctx.write(new TextWebSocketFrame(responseJson));
                     return;
                 }
 
                 // 4. Valid message - echo back with server timestamp
                 ServerResponse successResponse = ServerResponse.success(message, serverTimestamp);
                 String responseJson = objectMapper.writeValueAsString(successResponse);
-                ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+                ctx.write(new TextWebSocketFrame(responseJson));
 
                 // logger.info("Validated and echoed (roomId={}): {}", roomId, message);
 
@@ -80,12 +80,17 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                 ServerResponse errorResponse = ServerResponse.error(
                         "Invalid JSON format: " + e.getMessage(), serverTimestamp);
                 String responseJson = objectMapper.writeValueAsString(errorResponse);
-                ctx.writeAndFlush(new TextWebSocketFrame(responseJson));
+                ctx.write(new TextWebSocketFrame(responseJson));
                 logger.warn("Invalid JSON format", e);
             }
         } finally {
             // Intentionally empty: avoid per-message MDC overhead on hot path.
         }
+    }
+
+    @Override
+    public void channelReadComplete(ChannelHandlerContext ctx) {
+        ctx.flush();
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.chatflow.client;
 
+import com.chatflow.util.RateLimiter;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFactory;
 import io.netty.channel.EventLoopGroup;
@@ -40,6 +41,9 @@ public class ChatClient {
     private final int flushIntervalMs;
     private final boolean flushSync;
     private final int connectionsPerRoom;
+    private final int mainThreadsOverride;
+    private final int targetQps;
+    private final RateLimiter rateLimiter;
 
     public ChatClient(ClientConfig.ClientSettings settings, String serverUrlOverride) {
         this.serverUrl = serverUrlOverride != null ? serverUrlOverride : settings.getServerUrl();
@@ -54,6 +58,9 @@ public class ChatClient {
         this.flushIntervalMs = settings.getFlushIntervalMs();
         this.flushSync = settings.isFlushSync();
         this.connectionsPerRoom = settings.getConnectionsPerRoom();
+        this.mainThreadsOverride = settings.getMainThreads();
+        this.targetQps = settings.getTargetQps();
+        this.rateLimiter = targetQps > 0 ? RateLimiter.create(targetQps) : null;
         EventLoopGroup eventLoopGroup;
         ChannelFactory<? extends Channel> socketChannelFactory;
         if (Epoll.isAvailable()) {
@@ -91,6 +98,9 @@ public class ChatClient {
                 warmupThreads, warmupMessagesPerThread, connectionsPerRoom);
         logger.info("Config: batchSize={}, batchMaxBytes={}, flushIntervalMs={}, flushSync={}",
                 batchSize, batchMaxBytes, flushIntervalMs, flushSync);
+        String mainThreadsLabel = mainThreadsOverride > 0 ? String.valueOf(mainThreadsOverride) : "auto";
+        String targetQpsLabel = targetQps > 0 ? String.valueOf(targetQps) : "unlimited";
+        logger.info("Config: mainThreads={}, targetQps={}", mainThreadsLabel, targetQpsLabel);
 
         BlockingQueue<MessageTemplate> messageQueue = new ArrayBlockingQueue<>(100_000);
 
@@ -107,7 +117,10 @@ public class ChatClient {
         logger.info("Warmup completed in {} ms", (warmupEnd - warmupStart));
 
         logger.info("=== Main Phase ===");
-        int mainThreads = calculateOptimalThreads();
+        int mainThreads = mainThreadsOverride > 0 ? mainThreadsOverride : calculateOptimalThreads();
+        if (mainThreads < 1) {
+            mainThreads = 1;
+        }
         int messagesPerThread = mainPhaseMessages / mainThreads;
         int remainder = mainPhaseMessages % mainThreads;
         
@@ -152,7 +165,7 @@ public class ChatClient {
         for (int i = 0; i < numThreads; i++) {
             int messagesToSend = messagesPerThread + (i < extraMessages ? 1 : 0);
             Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool, metrics,
-                    batchSize, batchMaxBytes, flushIntervalMs, flushSync));
+                    batchSize, batchMaxBytes, flushIntervalMs, flushSync, rateLimiter));
             threads.add(thread);
             thread.start();
         }

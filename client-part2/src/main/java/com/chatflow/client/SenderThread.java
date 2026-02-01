@@ -1,6 +1,7 @@
 package com.chatflow.client;
 
 import com.chatflow.protocol.ChatMessage;
+import com.chatflow.util.RateLimiter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
@@ -38,12 +39,14 @@ public class SenderThread implements Runnable {
     private final int maxBufferedBytes;
     private final long flushIntervalNs;
     private final boolean syncOnFlush;
+    private final RateLimiter rateLimiter;
 
     public SenderThread(BlockingQueue<MessageTemplate> messageQueue,
                        int messagesToSend, ConnectionPool connectionPool,
                        DetailedMetricsCollector metrics,
                        int batchSize, int maxBufferedBytes,
-                       int flushIntervalMs, boolean syncOnFlush) {
+                       int flushIntervalMs, boolean syncOnFlush,
+                       RateLimiter rateLimiter) {
         this.messageQueue = messageQueue;
         this.messagesToSend = messagesToSend;
         this.connectionPool = connectionPool;
@@ -52,6 +55,7 @@ public class SenderThread implements Runnable {
         this.maxBufferedBytes = Math.max(1024, maxBufferedBytes);
         this.flushIntervalNs = Math.max(0, flushIntervalMs) * 1_000_000L;
         this.syncOnFlush = syncOnFlush;
+        this.rateLimiter = rateLimiter;
     }
 
     @Override
@@ -62,6 +66,9 @@ public class SenderThread implements Runnable {
             while (sentCount < messagesToSend) {
                 MessageTemplate template = messageQueue.take();
                 String roomId = template.getRoomId();
+                if (rateLimiter != null) {
+                    rateLimiter.acquire();
+                }
 
                 boolean sent = false;
                 for (int retry = 0; retry < MAX_RETRIES && !sent; retry++) {
