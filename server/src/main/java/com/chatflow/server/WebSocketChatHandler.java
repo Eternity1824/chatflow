@@ -3,7 +3,11 @@ package com.chatflow.server;
 import com.chatflow.protocol.ChatMessage;
 import com.chatflow.protocol.ServerResponse;
 import com.chatflow.protocol.MessageValidator;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.netty.buffer.ByteBufInputStream;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -12,12 +16,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
+import java.io.InputStream;
 import java.time.Instant;
 import io.netty.util.AttributeKey;
 
 public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final JsonFactory jsonFactory = objectMapper.getFactory();
     private static final Logger logger = LoggerFactory.getLogger(WebSocketChatHandler.class);
     private static final AttributeKey<Boolean> JOINED_ATTR = AttributeKey.valueOf("joined");
 
@@ -32,12 +38,9 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
             roomId = "unknown";
         }
         try {
-            String jsonText = ((TextWebSocketFrame) frame).text();
-            // logger.info("Received (roomId={}): {}", roomId, jsonText);
-
             try {
-                // 1. Parse JSON
-                ChatMessage message = objectMapper.readValue(jsonText, ChatMessage.class);
+                // 1. Parse JSON (streaming)
+                ChatMessage message = parseMessage((TextWebSocketFrame) frame);
 
                 // 2. Validate message
                 MessageValidator.ValidationResult result = MessageValidator.validate(message);
@@ -86,6 +89,68 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
         } finally {
             // Intentionally empty: avoid per-message MDC overhead on hot path.
         }
+    }
+
+    private ChatMessage parseMessage(TextWebSocketFrame frame) throws Exception {
+        String userId = null;
+        String username = null;
+        String message = null;
+        String timestamp = null;
+        String messageTypeRaw = null;
+        boolean invalidMessageType = false;
+
+        try (InputStream in = new ByteBufInputStream(frame.content(), false);
+             JsonParser parser = jsonFactory.createParser(in)) {
+            if (parser.nextToken() != JsonToken.START_OBJECT) {
+                throw new IllegalArgumentException("Expected JSON object");
+            }
+            while (parser.nextToken() != JsonToken.END_OBJECT) {
+                String fieldName = parser.getCurrentName();
+                if (fieldName == null) {
+                    parser.skipChildren();
+                    continue;
+                }
+                JsonToken valueToken = parser.nextToken();
+                if (valueToken == null) {
+                    break;
+                }
+                switch (fieldName) {
+                    case "userId":
+                        userId = parser.getValueAsString();
+                        break;
+                    case "username":
+                        username = parser.getValueAsString();
+                        break;
+                    case "message":
+                        message = parser.getValueAsString();
+                        break;
+                    case "timestamp":
+                        timestamp = parser.getValueAsString();
+                        break;
+                    case "messageType":
+                        messageTypeRaw = parser.getValueAsString();
+                        break;
+                    default:
+                        parser.skipChildren();
+                        break;
+                }
+            }
+        }
+
+        ChatMessage.MessageType messageType = null;
+        if (messageTypeRaw != null) {
+            try {
+                messageType = ChatMessage.MessageType.valueOf(messageTypeRaw);
+            } catch (IllegalArgumentException e) {
+                invalidMessageType = true;
+            }
+        }
+
+        if (invalidMessageType) {
+            throw new IllegalArgumentException("messageType must be one of TEXT, JOIN, or LEAVE");
+        }
+
+        return new ChatMessage(userId, username, message, timestamp, messageType);
     }
 
     @Override
