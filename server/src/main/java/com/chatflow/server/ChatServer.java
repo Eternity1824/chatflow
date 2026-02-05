@@ -58,7 +58,7 @@ public class ChatServer {
                             pipeline.addLast("httpAggregator", new HttpObjectAggregator(65536));
 
                             // Big file upload
-                            pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());
+                            // pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());
 
                             // Extract roomId from /chat/{roomId} during handshake
                             pipeline.addLast("roomIdExtractor", new RoomIdExtractorHandler());
