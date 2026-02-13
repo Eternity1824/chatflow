@@ -14,11 +14,13 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.Promise;
 
 import java.net.URI;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ConnectionPool {
+    private static final AttributeKey<ConcurrentLinkedQueue<Long>> SEND_TIMESTAMP_QUEUE_KEY =
+            AttributeKey.valueOf("sendTimestampQueue");
+
     private final ConcurrentHashMap<String, Channel> roomChannels;
     private final ConcurrentHashMap<String, CompletableFuture<Channel>> inFlightConnections;
     private final ConcurrentHashMap<String, AtomicInteger> roomCounters;
@@ -231,5 +236,45 @@ public class ConnectionPool {
             return null;
         }
         return channelRoomMap.get(channel.id().asShortText());
+    }
+
+    public void recordSendTimestamp(Channel channel, long sendTimestampMs) {
+        if (channel == null || sendTimestampMs <= 0) {
+            return;
+        }
+        getOrCreateSendTimestampQueue(channel).offer(sendTimestampMs);
+    }
+
+    public void discardSendTimestamp(Channel channel, long sendTimestampMs) {
+        if (channel == null || sendTimestampMs <= 0) {
+            return;
+        }
+        ConcurrentLinkedQueue<Long> queue = channel.attr(SEND_TIMESTAMP_QUEUE_KEY).get();
+        if (queue == null) {
+            return;
+        }
+        queue.remove(sendTimestampMs);
+    }
+
+    public long pollSendTimestamp(Channel channel) {
+        if (channel == null) {
+            return -1L;
+        }
+        ConcurrentLinkedQueue<Long> queue = channel.attr(SEND_TIMESTAMP_QUEUE_KEY).get();
+        if (queue == null) {
+            return -1L;
+        }
+        Long value = queue.poll();
+        return value != null ? value : -1L;
+    }
+
+    private ConcurrentLinkedQueue<Long> getOrCreateSendTimestampQueue(Channel channel) {
+        ConcurrentLinkedQueue<Long> queue = channel.attr(SEND_TIMESTAMP_QUEUE_KEY).get();
+        if (queue != null) {
+            return queue;
+        }
+        ConcurrentLinkedQueue<Long> newQueue = new ConcurrentLinkedQueue<>();
+        ConcurrentLinkedQueue<Long> existing = channel.attr(SEND_TIMESTAMP_QUEUE_KEY).setIfAbsent(newQueue);
+        return existing != null ? existing : newQueue;
     }
 }

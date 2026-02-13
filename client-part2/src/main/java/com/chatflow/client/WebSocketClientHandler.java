@@ -39,12 +39,12 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
             ChatMessage original = response.getOriginalMessage();
             ChatMessage.MessageType messageType = original != null ? original.getMessageType() : null;
 
-            long sendTimestampMs = -1;
-            if (original != null && original.getTimestamp() != null) {
+            long sendTimestampMs = connectionPool.pollSendTimestamp(ctx.channel());
+            if (sendTimestampMs < 0 && original != null && original.getTimestamp() != null) {
                 try {
                     sendTimestampMs = Instant.parse(original.getTimestamp()).toEpochMilli();
                 } catch (Exception e) {
-                    logger.warn("Failed to parse timestamp: {}", original.getTimestamp());
+                    sendTimestampMs = -1;
                 }
             }
 

@@ -1,7 +1,7 @@
 jvmOpts: "-Xms512m -Xmx1g"
 client:
-  serverUrl: "ws://35.93.149.224:8080/chat"
-  totalMessages: 5000000
+  serverUrl: "ws://35.85.60.60:8080/chat"
+  totalMessages: 1000000
   warmupThreads: 32
   warmupMessagesPerThread: 1000
   mainThreads: 32

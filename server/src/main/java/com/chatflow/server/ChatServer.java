@@ -45,7 +45,7 @@ public class ChatServer {
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childOption(ChannelOption.AUTO_READ, true)
                     .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK,
-                            new WriteBufferWaterMark( 1024 * 1024, 4 * 1024 * 1024))
+                            new WriteBufferWaterMark( 256 * 1024,  1024 * 1024))
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         public void initChannel(SocketChannel ch) throws Exception {

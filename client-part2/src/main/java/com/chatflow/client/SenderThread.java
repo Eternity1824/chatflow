@@ -15,11 +15,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.locks.LockSupport;
 
 public class SenderThread implements Runnable {
     private static final Logger logger = LoggerFactory.getLogger(SenderThread.class);
     private static final int MAX_RETRIES = 5;
     private static final int INITIAL_BACKOFF_MS = 100;
+    private static final long BACKPRESSURE_PARK_NS = 200_000L; // 0.2ms
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final Random random = new Random();
@@ -29,6 +31,7 @@ public class SenderThread implements Runnable {
         int pendingBytes;
         long lastFlushNs;
         ChannelFuture lastWriteFuture;
+        Channel channel;
     }
 
     private final BlockingQueue<MessageTemplate> messageQueue;
@@ -73,26 +76,33 @@ public class SenderThread implements Runnable {
                 boolean sent = false;
                 for (int retry = 0; retry < MAX_RETRIES && !sent; retry++) {
                     try {
-                        Channel channel = connectionPool.getOrCreateConnection(roomId);
+                        BatchState state = batches.computeIfAbsent(roomId, k -> {
+                            BatchState s = new BatchState();
+                            s.lastFlushNs = System.nanoTime();
+                            return s;
+                        });
+                        Channel channel = getOrCreateChannel(roomId, state);
                         String channelId = channel.id().asShortText();
                         MDC.put("roomId", roomId);
                         MDC.put("channelId", channelId);
                         try {
-                            BatchState state = batches.computeIfAbsent(roomId, k -> {
-                                BatchState s = new BatchState();
-                                s.lastFlushNs = System.nanoTime();
-                                return s;
-                            });
-
+                            long sendTimestampMs = System.currentTimeMillis();
                             ChatMessage message = new ChatMessage(
                                     template.getUserId(),
                                     template.getUsername(),
                                     template.getMessage(),
-                                    Instant.now().toString(),
+                                    Instant.ofEpochMilli(sendTimestampMs).toString(),
                                     template.getMessageType()
                             );
+                            waitForWritable(channel);
                             String jsonMessage = objectMapper.writeValueAsString(message);
+                            connectionPool.recordSendTimestamp(channel, sendTimestampMs);
                             ChannelFuture writeFuture = channel.write(new TextWebSocketFrame(jsonMessage));
+                            writeFuture.addListener(future -> {
+                                if (!future.isSuccess()) {
+                                    connectionPool.discardSendTimestamp(channel, sendTimestampMs);
+                                }
+                            });
                             state.lastWriteFuture = writeFuture;
                             state.pendingCount++;
                             state.pendingBytes += jsonMessage.length();
@@ -124,6 +134,10 @@ public class SenderThread implements Runnable {
                         } finally {
                             MDC.remove("roomId");
                         }
+                        BatchState state = batches.get(roomId);
+                        if (state != null) {
+                            state.channel = null;
+                        }
                         connectionPool.removeConnection(roomId);
                         if (retry < MAX_RETRIES - 1) {
                             int baseBackoffMs = INITIAL_BACKOFF_MS * (1 << retry);
@@ -151,7 +165,7 @@ public class SenderThread implements Runnable {
                 BatchState state = entry.getValue();
                 if (state.pendingCount > 0) {
                     try {
-                        Channel channel = connectionPool.getOrCreateConnection(roomId);
+                        Channel channel = getOrCreateChannel(roomId, state);
                         channel.flush();
                         if (syncOnFlush && state.lastWriteFuture != null) {
                             state.lastWriteFuture.sync();
@@ -164,6 +178,31 @@ public class SenderThread implements Runnable {
             }
         } catch (Exception e) {
             logger.error("Sender thread error", e);
+        }
+    }
+
+    private Channel getOrCreateChannel(String roomId, BatchState state) throws Exception {
+        Channel channel = state.channel;
+        if (channel != null && channel.isActive()) {
+            return channel;
+        }
+        channel = connectionPool.getOrCreateConnection(roomId);
+        state.channel = channel;
+        return channel;
+    }
+
+    private void waitForWritable(Channel channel) {
+        while (true) {
+            if (channel.isWritable()) {
+                return;
+            }
+            if (!channel.isActive()) {
+                return;
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                return;
+            }
+            LockSupport.parkNanos(BACKPRESSURE_PARK_NS);
         }
     }
 }
