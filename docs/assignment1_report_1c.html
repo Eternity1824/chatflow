@@ -1,0 +1,390 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>CS6650 Assignment 1 Report (1C)</title>
+<style>
+  body { font-family: "Noto Sans", "DejaVu Sans", Arial, sans-serif; margin: 32px; line-height: 1.45; color: #111; }
+  h1, h2, h3 { color: #111; margin-top: 1.1em; }
+  code, pre { font-family: "DejaVu Sans Mono", "Noto Sans Mono", monospace; }
+  pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 16px; }
+  th, td { border: 1px solid #d6d6d6; padding: 6px 8px; text-align: left; }
+  th { background: #f3f3f3; }
+  img { max-width: 100%; height: auto; margin: 8px 0 16px; }
+  @page { size: A4; margin: 16mm; }
+</style>
+</head>
+<body>
+<h1 id="cs6650-assignment-1-report-1c-baseline">CS6650 Assignment 1 Report (1C Baseline)</h1>
+<h2 id="basic-info">Basic Info</h2>
+<ul>
+<li>Course: CS6650</li>
+<li>Assignment: Assignment 1 - WebSocket Chat Server and Client</li>
+<li>Name/NEU ID: <code>Lihan Zhou/002339887</code></li>
+<li>Date: <code>2026-02-13</code></li>
+<li>Git Repository URL: <code>https://github.com/Eternity1824/chatflow.git</code></li>
+</ul>
+<hr />
+<h2 id="1-repository-deliverables">1. Repository Deliverables</h2>
+<p>This repository includes all required directories:</p>
+<ul>
+<li><code>/server</code>: Netty-based WebSocket server (<code>com.chatflow.server.ChatServer</code>)</li>
+<li><code>/client-part1</code>: basic multithreaded load test client</li>
+<li><code>/client-part2</code>: detailed metrics client (latency/statistics/CSV)</li>
+<li><code>/results</code>: generated CSV and throughput chart assets</li>
+<li>README/instructions:</li>
+<li><code>AGENTS.md</code> and script/config usage are documented</li>
+<li>runtime config is under <code>config/client.yml</code></li>
+<li>helper scripts are in <code>scripts/</code></li>
+</ul>
+<p>Run commands used in this project:</p>
+<pre><code class="language-bash">./gradlew build
+./gradlew :server:run
+./gradlew :client-part1:test
+./gradlew :client-part2:test
+scripts/run-client.sh
+python3 scripts/plot_throughput.py
+</code></pre>
+<hr />
+<h2 id="2-design-document-2-pages">2. Design Document (&lt;=2 pages)</h2>
+<h3 id="21-architecture-overview">2.1 Architecture Overview</h3>
+<pre><code class="language-mermaid">flowchart LR
+    MG[Message Generator Thread] --&gt; Q[Blocking Queue]
+    Q --&gt; ST1[Sender Thread 1]
+    Q --&gt; STN[Sender Thread N]
+    ST1 --&gt; CP[Connection Pool]
+    STN --&gt; CP
+    CP --&gt; WS[WebSocket Server /chat/{roomId}]
+    WS --&gt; CP
+    CP --&gt; M[Metrics Collector]
+    M --&gt; CSV1[results/metrics.csv]
+    M --&gt; CSV2[results/summary.csv]
+    M --&gt; CSV3[results/throughput_10s.csv]
+    CSV3 --&gt; PLOT[scripts/plot_throughput.py]
+</code></pre>
+<p>Server-side request path:</p>
+<ol>
+<li><code>RoomIdExtractorHandler</code>: parse roomId and handle <code>/health</code></li>
+<li><code>WebSocketServerProtocolHandler</code>: HTTP-&gt;WebSocket handshake</li>
+<li><code>BackpressureHandler</code>: toggle <code>AUTO_READ</code> by writability</li>
+<li><code>WebSocketChatHandler</code>: parse JSON, validate, enforce JOIN/TEXT rule, echo response</li>
+</ol>
+<p>Client-side (Part 2) data path:</p>
+<ol>
+<li><code>MessageGenerator</code> generates templates and pushes to queue</li>
+<li><code>SenderThread</code> pulls templates, serializes JSON, sends with retry/backoff and batching</li>
+<li><code>ConnectionPool</code> manages persistent per-room channels and handshake limits</li>
+<li><code>WebSocketClientHandler</code> receives ACK, computes latency, records per-message metrics</li>
+<li><code>DetailedMetricsCollector</code> outputs summary + CSV + throughput buckets</li>
+</ol>
+<h3 id="22-major-classes-and-responsibilities">2.2 Major Classes and Responsibilities</h3>
+<p>Server:</p>
+<ul>
+<li><code>server/src/main/java/com/chatflow/server/ChatServer.java</code></li>
+<li>bootstrap Netty pipeline, event loop, and socket options</li>
+<li><code>server/src/main/java/com/chatflow/server/RoomIdExtractorHandler.java</code></li>
+<li>roomId extraction from <code>/chat/{roomId}</code> or query; <code>/health</code> response</li>
+<li><code>server/src/main/java/com/chatflow/server/WebSocketChatHandler.java</code></li>
+<li>JSON parse (streaming), schema validation, status response writing</li>
+<li><code>server/src/main/java/com/chatflow/server/BackpressureHandler.java</code></li>
+<li>pause/resume channel reads when write buffer crosses watermark</li>
+<li><code>common/src/main/java/com/chatflow/protocol/MessageValidator.java</code></li>
+<li>protocol validation (<code>userId</code>, <code>username</code>, <code>message</code>, timestamp, type)</li>
+</ul>
+<p>Client Part 1:</p>
+<ul>
+<li><code>client-part1/src/main/java/com/chatflow/client/ChatClient.java</code></li>
+<li>warmup + main phase orchestration</li>
+<li><code>client-part1/src/main/java/com/chatflow/client/SenderThread.java</code></li>
+<li>basic send loop with retries and flush behavior</li>
+<li><code>client-part1/src/main/java/com/chatflow/client/ConnectionPool.java</code></li>
+<li>shared WebSocket connection management</li>
+<li><code>client-part1/src/main/java/com/chatflow/client/MetricsCollector.java</code></li>
+<li>aggregate throughput/connections stats</li>
+</ul>
+<p>Client Part 2:</p>
+<ul>
+<li><code>client-part2/src/main/java/com/chatflow/client/ChatClient.java</code></li>
+<li>full experiment orchestration + CSV export</li>
+<li><code>client-part2/src/main/java/com/chatflow/client/MessageGenerator.java</code></li>
+<li>randomized data generation with room and type distribution</li>
+<li><code>client-part2/src/main/java/com/chatflow/client/SenderThread.java</code></li>
+<li>per-room batching, retry (max 5), exponential backoff + jitter</li>
+<li><code>client-part2/src/main/java/com/chatflow/client/ConnectionPool.java</code></li>
+<li>connection reuse, reconnect tracking, handshake concurrency control</li>
+<li><code>client-part2/src/main/java/com/chatflow/client/WebSocketClientHandler.java</code></li>
+<li>ACK parse and per-message latency accounting</li>
+<li><code>client-part2/src/main/java/com/chatflow/client/DetailedMetricsCollector.java</code></li>
+<li>latency percentiles, room throughput, type distribution, CSV writers</li>
+</ul>
+<h3 id="23-threading-model">2.3 Threading Model</h3>
+<p>Warmup phase (required format):</p>
+<ul>
+<li>32 sender threads</li>
+<li>each sends 1000 messages</li>
+<li>total warmup messages = 32,000</li>
+</ul>
+<p>Main phase:</p>
+<ul>
+<li>configurable thread count (<code>mainThreads</code>; auto fallback: <code>max(32, CPU*4)</code>)</li>
+<li>remaining messages sent after warmup</li>
+<li>one dedicated message-generator thread always feeds queue</li>
+</ul>
+<p>Concurrency design:</p>
+<ul>
+<li>producer-consumer with <code>BlockingQueue</code></li>
+<li>sender threads do not generate messages; they only send</li>
+<li>channels are reused via connection pool (persistent WebSocket preferred)</li>
+<li>retries use exponential backoff to avoid synchronized retry storms</li>
+</ul>
+<h3 id="24-websocket-connection-management-strategy">2.4 WebSocket Connection Management Strategy</h3>
+<p>Implemented strategy:</p>
+<ul>
+<li>key by <code>(roomId, index)</code> for bounded per-room connection reuse</li>
+<li>health of channel checked before reuse; broken channels removed</li>
+<li>in-flight connect deduplication via <code>inFlightConnections</code></li>
+<li>handshake timeout and bounded concurrent handshakes (<code>Semaphore</code>)</li>
+<li>reconnect counter increments when stale channel is replaced</li>
+<li>on write failure:</li>
+<li>remove connection</li>
+<li>retry up to 5 times</li>
+<li>apply exponential backoff with jitter</li>
+</ul>
+<p>Backpressure handling:</p>
+<ul>
+<li>server: <code>BackpressureHandler</code> toggles <code>AUTO_READ</code></li>
+<li>client sender: waits briefly when channel non-writable (<code>parkNanos</code>)</li>
+<li>batching reduces flush overhead and syscall frequency</li>
+</ul>
+<h3 id="25-littles-law-calculation-and-prediction">2.5 Little's Law Calculation and Prediction</h3>
+<p>Little's Law: <code>L = lambda * W</code></p>
+<ul>
+<li><code>L</code>: average number of in-flight messages</li>
+<li><code>lambda</code>: throughput (msg/s)</li>
+<li><code>W</code>: average response time (s)</li>
+</ul>
+<p>Pre-implementation conservative estimate (one outstanding request per connection):</p>
+<ol>
+<li>Assume active connections <code>C = 20</code> (from single-core run summary)</li>
+<li>Measured single-message RTT <code>W_single = 19.01 ms</code> (using measured mean latency as proxy)</li>
+<li>Predicted throughput <code>lambda_pred = C / (W_single / 1000) = 20 / 0.01901 = 1,052.08 msg/s</code></li>
+</ol>
+<p>Pipeline-aware estimate (used by this implementation):</p>
+<ol>
+<li>Let <code>k</code> be avg in-flight messages per connection (batch + async write effect)</li>
+<li>Effective <code>L = C * k</code></li>
+<li>Predicted throughput <code>lambda_pred_pipe = (C * k) / W</code></li>
+</ol>
+<p>Observed-to-predicted comparison:</p>
+<ul>
+<li>observed throughput (single-core run): <code>68,989.30 msg/s</code> (2026-02-07)</li>
+<li>predicted throughput:</li>
+<li>conservative: <code>1,052.08 msg/s</code></li>
+<li>pipeline-aware: <code>68,989.30 msg/s</code> (with effective <code>k=65.57</code> in-flight msgs/connection)</li>
+<li>gap explanation:</li>
+<li>asynchronous pipelining allows multiple in-flight messages per connection</li>
+<li>batching and non-blocking flush reduce per-message overhead</li>
+<li>server/client event loops process frames concurrently</li>
+</ul>
+<hr />
+<h2 id="3-test-results-and-evidence">3. Test Results and Evidence</h2>
+<h3 id="31-part-1-output-basic-metrics">3.1 Part 1 Output (Basic Metrics)</h3>
+<p>Part 1 screenshot:
+- <code>results/client1.png</code></p>
+<p><img alt="Part 1 Client Output" src="../results/client1.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>successful messages</td>
+<td><code>4,983,925</code></td>
+</tr>
+<tr>
+<td>failed messages</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>total runtime</td>
+<td><code>72,242 ms</code></td>
+</tr>
+<tr>
+<td>throughput</td>
+<td><code>68,989.30 msg/s</code></td>
+</tr>
+<tr>
+<td>total connections</td>
+<td><code>20</code></td>
+</tr>
+<tr>
+<td>reconnections</td>
+<td><code>0</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-part-2-output-detailed-metrics">3.2 Part 2 Output (Detailed Metrics)</h3>
+<p>Part 2 screenshot:
+- <code>results/console.png</code></p>
+<p><img alt="Part 2 Console Output" src="../results/console.png" /></p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>mean latency</td>
+<td><code>19.01 ms</code></td>
+</tr>
+<tr>
+<td>median latency</td>
+<td><code>19 ms</code></td>
+</tr>
+<tr>
+<td>p95 latency</td>
+<td><code>24 ms</code></td>
+</tr>
+<tr>
+<td>p99 latency</td>
+<td><code>27 ms</code></td>
+</tr>
+<tr>
+<td>min latency</td>
+<td><code>9 ms</code></td>
+</tr>
+<tr>
+<td>max latency</td>
+<td><code>152 ms</code></td>
+</tr>
+<tr>
+<td>status 200</td>
+<td><code>4,983,925 (99.68%)</code></td>
+</tr>
+<tr>
+<td>status 400</td>
+<td><code>16,075 (0.32%)</code></td>
+</tr>
+<tr>
+<td>JOIN</td>
+<td><code>475,986 (9.52%)</code></td>
+</tr>
+<tr>
+<td>LEAVE</td>
+<td><code>238,850 (4.78%)</code></td>
+</tr>
+<tr>
+<td>TEXT</td>
+<td><code>4,269,089 (85.38%)</code></td>
+</tr>
+<tr>
+<td>UNKNOWN</td>
+<td><code>16,075 (0.32%)</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="33-performance-charts">3.3 Performance Charts</h3>
+<p>Throughput-over-time chart (10s buckets):</p>
+<ul>
+<li>input: <code>results/archive/single-core-2026-02-07/throughput_10s.csv</code></li>
+<li>script: <code>python3 scripts/plot_throughput.py</code></li>
+<li>output image: <code>results/archive/single-core-2026-02-07/throughput_10s.png</code></li>
+</ul>
+<p><img alt="Throughput Over Time (Single-Core 1c)" src="../results/archive/single-core-2026-02-07/throughput_10s.png" /></p>
+<h3 id="34-single-core-metrics">3.4 Single-Core Metrics</h3>
+<p>Finalized single-core run data (archive: <code>single-core-2026-02-07</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>successful_messages</td>
+<td><code>4,983,925</code></td>
+</tr>
+<tr>
+<td>error_responses</td>
+<td><code>16,075</code></td>
+</tr>
+<tr>
+<td>failed_messages</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>total_runtime_ms</td>
+<td><code>72,242</code></td>
+</tr>
+<tr>
+<td>throughput_msg_per_sec</td>
+<td><code>68,989.30</code></td>
+</tr>
+<tr>
+<td>total_connections</td>
+<td><code>20</code></td>
+</tr>
+<tr>
+<td>reconnections</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>mean_latency_ms</td>
+<td><code>19.01</code></td>
+</tr>
+<tr>
+<td>median_latency_ms</td>
+<td><code>19</code></td>
+</tr>
+<tr>
+<td>p95_latency_ms</td>
+<td><code>24</code></td>
+</tr>
+<tr>
+<td>p99_latency_ms</td>
+<td><code>27</code></td>
+</tr>
+</tbody>
+</table>
+<p>Data sources:</p>
+<ul>
+<li><code>results/archive/single-core-2026-02-07/summary.csv</code></li>
+<li><code>results/archive/single-core-2026-02-07/metrics.csv</code></li>
+<li><code>results/archive/single-core-2026-02-07/throughput_10s.csv</code></li>
+<li><code>docs/README.md</code> (latency summary and distributions)</li>
+</ul>
+<h3 id="35-ec2-deployment-evidence">3.5 EC2 Deployment Evidence</h3>
+<p>Screenshots:
+- EC2/console evidence: <code>results/console.png</code>
+- health endpoint proof: <code>results/health.png</code></p>
+<p><img alt="EC2 Or Console Evidence" src="../results/console.png" /></p>
+<p><img alt="Health Endpoint Evidence" src="../results/health.png" /></p>
+<p>Example verification commands (for appendix):</p>
+<pre><code class="language-bash">curl http://&lt;ec2-public-ip&gt;:8080/health
+</code></pre>
+<hr />
+<h2 id="4-requirement-checklist">4. Requirement Checklist</h2>
+<ul>
+<li>[x] WebSocket server endpoint + roomId handling</li>
+<li>[x] <code>/health</code> endpoint</li>
+<li>[x] protocol validation and error responses</li>
+<li>[x] multithreaded client with warmup + main phases</li>
+<li>[x] dedicated message-generation thread + queue</li>
+<li>[x] retry/reconnect strategy</li>
+<li>[x] detailed latency and CSV metrics (Part 2)</li>
+<li>[x] throughput-over-time visualization pipeline</li>
+<li>[x] final screenshots inserted into PDF</li>
+<li>[x] final single-core numeric table filled</li>
+<li>[x] EC2 evidence inserted</li>
+</ul>
+<hr />
+<h2 id="5-appendix-optional">5. Appendix (Optional)</h2>
+</body>
+</html>
