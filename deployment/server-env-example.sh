@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Example env vars for server-v2
+
+export CHATFLOW_SERVER_ID="server-1"
+export CHATFLOW_INTERNAL_TOKEN="replace-with-shared-secret"
+
+export CHATFLOW_RABBIT_HOST="rabbitmq-host"
+export CHATFLOW_RABBIT_PORT="5672"
+export CHATFLOW_RABBIT_USERNAME="guest"
+export CHATFLOW_RABBIT_PASSWORD="guest"
+export CHATFLOW_RABBIT_VHOST="/"
+export CHATFLOW_RABBIT_EXCHANGE="chat.exchange"
+
+export CHATFLOW_RABBIT_CHANNEL_POOL_SIZE="16"
+export CHATFLOW_ROOM_START="1"
+export CHATFLOW_ROOM_END="20"
+export CHATFLOW_QUEUE_MESSAGE_TTL_MS="60000"
+export CHATFLOW_QUEUE_MAX_LENGTH="10000"

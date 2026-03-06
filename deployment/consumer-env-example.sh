@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Example env vars for consumer module
+
+export CHATFLOW_RABBIT_HOST="rabbitmq-host"
+export CHATFLOW_RABBIT_PORT="5672"
+export CHATFLOW_RABBIT_USERNAME="guest"
+export CHATFLOW_RABBIT_PASSWORD="guest"
+export CHATFLOW_RABBIT_VHOST="/"
+export CHATFLOW_RABBIT_EXCHANGE="chat.exchange"
+
+export CHATFLOW_ROOM_START="1"
+export CHATFLOW_ROOM_END="20"
+export CHATFLOW_QUEUE_MESSAGE_TTL_MS="60000"
+export CHATFLOW_QUEUE_MAX_LENGTH="10000"
+
+export CHATFLOW_CONSUMER_THREADS="20"
+export CHATFLOW_CONSUMER_PREFETCH="100"
+export CHATFLOW_CONSUMER_MAX_RETRIES="3"
+export CHATFLOW_CONSUMER_HEALTH_PORT="8090"
+
+export CHATFLOW_INTERNAL_TOKEN="replace-with-shared-secret"
+export CHATFLOW_BROADCAST_TARGETS="http://server1:8080,http://server2:8080,http://server3:8080,http://server4:8080"

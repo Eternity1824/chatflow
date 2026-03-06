@@ -1,14 +1,14 @@
 jvmOpts: "-Xms512m -Xmx1g"
 client:
-  serverUrl: "ws://35.87.16.91:8080/chat"
+  serverUrl: "ws://54.149.194.165:8080/chat"
   totalMessages: 500000
   warmupThreads: 32
   warmupMessagesPerThread: 1000
   mainThreads: 32
-  targetQps: 70000
+  targetQps: 50000
   connectionsPerRoom: 1
   handshakeTimeoutSeconds: 20
-  maxConcurrentHandshakes: 24
+  maxConcurrentHandshakes: 12
   handshakeRetryDelayMs: 10
   responseWaitSeconds: 30
   batchSize: 100
