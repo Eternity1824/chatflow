@@ -19,6 +19,9 @@ public class RabbitMqConfig {
     private final int roomEnd;
     private final long queueMessageTtlMs;
     private final int queueMaxLength;
+    private final boolean circuitBreakerEnabled;
+    private final int circuitBreakerFailureThreshold;
+    private final long circuitBreakerOpenDurationMs;
 
     public RabbitMqConfig(
             String host,
@@ -31,7 +34,10 @@ public class RabbitMqConfig {
             int roomStart,
             int roomEnd,
             long queueMessageTtlMs,
-            int queueMaxLength) {
+            int queueMaxLength,
+            boolean circuitBreakerEnabled,
+            int circuitBreakerFailureThreshold,
+            long circuitBreakerOpenDurationMs) {
         this.host = host;
         this.port = port;
         this.username = username;
@@ -43,6 +49,9 @@ public class RabbitMqConfig {
         this.roomEnd = roomEnd;
         this.queueMessageTtlMs = queueMessageTtlMs;
         this.queueMaxLength = queueMaxLength;
+        this.circuitBreakerEnabled = circuitBreakerEnabled;
+        this.circuitBreakerFailureThreshold = circuitBreakerFailureThreshold;
+        this.circuitBreakerOpenDurationMs = circuitBreakerOpenDurationMs;
     }
 
     public static RabbitMqConfig fromEnvironment() {
@@ -62,7 +71,10 @@ public class RabbitMqConfig {
                 roomStart,
                 roomEnd,
                 Long.parseLong(env("CHATFLOW_QUEUE_MESSAGE_TTL_MS", "60000")),
-                Integer.parseInt(env("CHATFLOW_QUEUE_MAX_LENGTH", "10000")));
+                Integer.parseInt(env("CHATFLOW_QUEUE_MAX_LENGTH", "10000")),
+                Boolean.parseBoolean(env("CHATFLOW_CIRCUIT_BREAKER_ENABLED", "true")),
+                Integer.parseInt(env("CHATFLOW_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")),
+                Long.parseLong(env("CHATFLOW_CIRCUIT_BREAKER_OPEN_MS", "5000")));
     }
 
     private static String env(String key, String defaultValue) {
@@ -115,5 +127,17 @@ public class RabbitMqConfig {
 
     public int getQueueMaxLength() {
         return queueMaxLength;
+    }
+
+    public boolean isCircuitBreakerEnabled() {
+        return circuitBreakerEnabled;
+    }
+
+    public int getCircuitBreakerFailureThreshold() {
+        return circuitBreakerFailureThreshold;
+    }
+
+    public long getCircuitBreakerOpenDurationMs() {
+        return circuitBreakerOpenDurationMs;
     }
 }
