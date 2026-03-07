@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euxo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get upgrade -y
+apt-get install -y openjdk-17-jre-headless curl
+mkdir -p /etc/chatflow /opt/chatflow /var/log/chatflow
+
+cat >/etc/chatflow/server-v2.env <<'EOF'
+CHATFLOW_SERVER_ID=${server_id}
+CHATFLOW_INTERNAL_TOKEN=${internal_token}
+CHATFLOW_RABBIT_HOST=${rabbit_host}
+CHATFLOW_RABBIT_PORT=${rabbit_port}
+CHATFLOW_RABBIT_USERNAME=${rabbit_username}
+CHATFLOW_RABBIT_PASSWORD=${rabbit_password}
+CHATFLOW_RABBIT_VHOST=${rabbit_vhost}
+CHATFLOW_RABBIT_EXCHANGE=${rabbit_exchange}
+CHATFLOW_ROOM_START=${room_start}
+CHATFLOW_ROOM_END=${room_end}
+CHATFLOW_QUEUE_MESSAGE_TTL_MS=${queue_message_ttl_ms}
+CHATFLOW_QUEUE_MAX_LENGTH=${queue_max_length}
+EOF
+
+if [ -n "${server_jar_url}" ]; then
+  curl -fsSL "${server_jar_url}" -o /opt/chatflow/server-v2-all.jar
+
+  cat >/etc/systemd/system/chatflow-server-v2.service <<'EOF'
+[Unit]
+Description=ChatFlow Server V2
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/chatflow/server-v2.env
+ExecStart=/bin/bash -lc 'java -jar /opt/chatflow/server-v2-all.jar 8080 0 ${CHATFLOW_SERVER_ID}'
+Restart=always
+RestartSec=2
+StandardOutput=append:/var/log/chatflow/server-v2.log
+StandardError=append:/var/log/chatflow/server-v2.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable chatflow-server-v2
+  systemctl start chatflow-server-v2
+fi

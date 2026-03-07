@@ -1,0 +1,57 @@
+#!/bin/bash
+set -euxo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get upgrade -y
+apt-get install -y openjdk-17-jre-headless curl
+mkdir -p /etc/chatflow /opt/chatflow /var/log/chatflow
+
+cat >/etc/chatflow/consumer.env <<'EOF'
+CHATFLOW_RABBIT_HOST=${rabbit_host}
+CHATFLOW_RABBIT_PORT=${rabbit_port}
+CHATFLOW_RABBIT_USERNAME=${rabbit_username}
+CHATFLOW_RABBIT_PASSWORD=${rabbit_password}
+CHATFLOW_RABBIT_VHOST=${rabbit_vhost}
+CHATFLOW_RABBIT_EXCHANGE=${rabbit_exchange}
+CHATFLOW_ROOM_START=${room_start}
+CHATFLOW_ROOM_END=${room_end}
+CHATFLOW_QUEUE_MESSAGE_TTL_MS=${queue_message_ttl_ms}
+CHATFLOW_QUEUE_MAX_LENGTH=${queue_max_length}
+CHATFLOW_CONSUMER_THREADS=${consumer_threads}
+CHATFLOW_CONSUMER_PREFETCH=${consumer_prefetch}
+CHATFLOW_CONSUMER_MAX_RETRIES=${consumer_max_retries}
+CHATFLOW_CONSUMER_RETRY_BACKOFF_BASE_MS=${consumer_retry_backoff_base_ms}
+CHATFLOW_CONSUMER_RETRY_BACKOFF_MAX_MS=${consumer_retry_backoff_max_ms}
+CHATFLOW_CONSUMER_HEALTH_PORT=${consumer_health_port}
+CHATFLOW_CONSUMER_DEDUP_MAX_ENTRIES=${consumer_dedup_max_entries}
+CHATFLOW_CONSUMER_DEDUP_TTL_MS=${consumer_dedup_ttl_ms}
+CHATFLOW_INTERNAL_TOKEN=${internal_token}
+CHATFLOW_BROADCAST_TARGETS=${broadcast_targets}
+EOF
+
+if [ -n "${consumer_jar_url}" ]; then
+  curl -fsSL "${consumer_jar_url}" -o /opt/chatflow/consumer-all.jar
+
+  cat >/etc/systemd/system/chatflow-consumer.service <<'EOF'
+[Unit]
+Description=ChatFlow Consumer
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/chatflow/consumer.env
+ExecStart=/bin/bash -lc 'java -jar /opt/chatflow/consumer-all.jar'
+Restart=always
+RestartSec=2
+StandardOutput=append:/var/log/chatflow/consumer.log
+StandardError=append:/var/log/chatflow/consumer.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable chatflow-consumer
+  systemctl start chatflow-consumer
+fi

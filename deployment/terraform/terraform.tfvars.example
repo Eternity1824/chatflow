@@ -1,0 +1,25 @@
+aws_region   = "us-west-2"
+name_prefix  = "chatflow-a2"
+environment  = "assignment2"
+
+# Set your own office/home public IP CIDR for SSH and admin UIs.
+# Example: ["203.0.113.10/32"]
+admin_cidrs = []
+
+# Optional: if you have an EC2 key pair.
+key_name = ""
+
+# Assignment load-balanced scenarios: set to 1, 2, then 4 for tests.
+server_count = 4
+
+server_instance_type   = "t3.small"
+consumer_instance_type = "t3.small"
+rabbit_instance_type   = "t3.small"
+
+chatflow_internal_token = "replace-with-strong-token"
+rabbit_username         = "guest"
+rabbit_password         = "guest"
+
+# Optional: if set, instances auto-install and run these jars with systemd.
+# server_jar_url   = "https://<bucket-or-host>/server-v2-all.jar"
+# consumer_jar_url = "https://<bucket-or-host>/consumer-all.jar"
