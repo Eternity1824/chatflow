@@ -22,6 +22,8 @@ public class ConsumerConfig {
     private final int roomStart;
     private final int roomEnd;
     private final int maxRetries;
+    private final long retryBackoffBaseMs;
+    private final long retryBackoffMaxMs;
     private final long pollIntervalMs;
     private final long queueMessageTtlMs;
     private final int queueMaxLength;
@@ -45,6 +47,8 @@ public class ConsumerConfig {
             int roomStart,
             int roomEnd,
             int maxRetries,
+            long retryBackoffBaseMs,
+            long retryBackoffMaxMs,
             long pollIntervalMs,
             long queueMessageTtlMs,
             int queueMaxLength,
@@ -66,6 +70,8 @@ public class ConsumerConfig {
         this.roomStart = roomStart;
         this.roomEnd = roomEnd;
         this.maxRetries = maxRetries;
+        this.retryBackoffBaseMs = retryBackoffBaseMs;
+        this.retryBackoffMaxMs = retryBackoffMaxMs;
         this.pollIntervalMs = pollIntervalMs;
         this.queueMessageTtlMs = queueMessageTtlMs;
         this.queueMaxLength = queueMaxLength;
@@ -96,6 +102,8 @@ public class ConsumerConfig {
                 roomStart,
                 roomEnd,
                 intEnv("CHATFLOW_CONSUMER_MAX_RETRIES", 3),
+                longEnv("CHATFLOW_CONSUMER_RETRY_BACKOFF_BASE_MS", 25L),
+                longEnv("CHATFLOW_CONSUMER_RETRY_BACKOFF_MAX_MS", 2_000L),
                 longEnv("CHATFLOW_CONSUMER_POLL_MS", 10L),
                 longEnv("CHATFLOW_QUEUE_MESSAGE_TTL_MS", 60_000L),
                 intEnv("CHATFLOW_QUEUE_MAX_LENGTH", 10_000),
@@ -193,6 +201,14 @@ public class ConsumerConfig {
 
     public int getMaxRetries() {
         return maxRetries;
+    }
+
+    public long getRetryBackoffBaseMs() {
+        return retryBackoffBaseMs;
+    }
+
+    public long getRetryBackoffMaxMs() {
+        return retryBackoffMaxMs;
     }
 
     public long getPollIntervalMs() {

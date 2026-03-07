@@ -21,6 +21,13 @@ public class ConsumerApp {
                 config.getRoomStart(),
                 config.getRoomEnd(),
                 config.getBroadcastTargets());
+        logger.info("Retry config: maxRetries={}, backoffBaseMs={}, backoffMaxMs={}",
+                config.getMaxRetries(),
+                config.getRetryBackoffBaseMs(),
+                config.getRetryBackoffMaxMs());
+        logger.info("Dedupe config: maxEntries={}, ttlMs={}",
+                config.getDedupMaxEntries(),
+                config.getDedupTtlMs());
 
         RabbitTopologyInitializer.initialize(config);
 
@@ -28,6 +35,7 @@ public class ConsumerApp {
         MessageDeduplicator deduplicator = new MessageDeduplicator(
                 config.getDedupMaxEntries(),
                 config.getDedupTtlMs());
+        RoomSequenceManager roomSequenceManager = new RoomSequenceManager();
         BroadcastClient broadcastClient = new BroadcastClient(
                 config.getBroadcastTargets(),
                 config.getInternalBroadcastToken(),
@@ -48,6 +56,7 @@ public class ConsumerApp {
                     queueAssignments.get(i),
                     config,
                     roomManager,
+                    roomSequenceManager,
                     deduplicator,
                     metrics);
             workers.add(worker);

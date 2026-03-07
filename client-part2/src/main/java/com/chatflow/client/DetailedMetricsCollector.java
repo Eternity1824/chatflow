@@ -18,11 +18,14 @@ public class DetailedMetricsCollector {
     private final AtomicInteger ackIndex = new AtomicInteger(0);
     private final LongAdder successCount = new LongAdder();
     private final LongAdder errorResponseCount = new LongAdder();
+    private final LongAdder broadcastDeliveryCount = new LongAdder();
+    private final LongAdder outOfOrderBroadcastCount = new LongAdder();
     private final LongAdder failureCount = new LongAdder();
     private final LongAdder totalConnections = new LongAdder();
     private final LongAdder reconnections = new LongAdder();
     private final ConcurrentHashMap<String, LongAdder> roomCounts = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LongAdder> typeCounts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> lastRoomSequence = new ConcurrentHashMap<>();
     private final CsvWriter perMessageWriter;
 
     private volatile long startTimeMs;
@@ -33,7 +36,7 @@ public class DetailedMetricsCollector {
         this.latenciesMs = new long[totalMessages];
         this.ackTimesMs = new long[totalMessages];
         this.perMessageWriter = new CsvWriter(csvPath,
-                "timestamp,messageType,latencyMs,statusCode,roomId");
+                "timestamp,messageType,latencyMs,statusCode,roomId,responseType,messageId,roomSequence");
     }
 
     public void recordConnection() {
@@ -59,7 +62,8 @@ public class DetailedMetricsCollector {
 
     public void recordResponse(long sendTimeMs, ChatMessage.MessageType messageType,
                                long latencyMs, int statusCode, String roomId,
-                               long ackTimeMs, String status) {
+                               long ackTimeMs, String status, String responseType,
+                               String messageId, Long roomSequence) {
         if (statusCode == 200) {
             successCount.increment();
         } else {
@@ -88,15 +92,48 @@ public class DetailedMetricsCollector {
         typeCounts.computeIfAbsent(typeKey, k -> new LongAdder()).increment();
 
         String timestampValue = sendTimeMs >= 0 ? String.valueOf(sendTimeMs) : "";
-        String line = String.format("%s,%s,%d,%d,%s",
+        String line = String.format("%s,%s,%d,%d,%s,%s,%s,%s",
                 timestampValue,
                 typeKey,
                 latencyMs,
                 statusCode,
-                roomId == null ? "" : roomId);
+                roomId == null ? "" : roomId,
+                responseType == null ? "" : responseType,
+                messageId == null ? "" : messageId,
+                roomSequence == null ? "" : String.valueOf(roomSequence));
         perMessageWriter.writeLine(line);
 
         responseLatch.countDown();
+    }
+
+    public void recordBroadcastDelivery(
+            ChatMessage.MessageType messageType,
+            String roomId,
+            long ackTimeMs,
+            String messageId,
+            Long roomSequence) {
+        broadcastDeliveryCount.increment();
+        String typeKey = messageType != null ? messageType.name() : "UNKNOWN";
+        String roomKey = roomId == null ? "unknown" : roomId;
+        if (roomSequence != null) {
+            lastRoomSequence.compute(roomKey, (key, last) -> {
+                if (last != null && roomSequence <= last) {
+                    outOfOrderBroadcastCount.increment();
+                    return last;
+                }
+                return roomSequence;
+            });
+        }
+        String line = String.format("%d,%s,%d,%d,%s,%s,%s,%s",
+                ackTimeMs,
+                typeKey,
+                -1,
+                202,
+                roomId == null ? "" : roomId,
+                "BROADCAST",
+                messageId == null ? "" : messageId,
+                roomSequence == null ? "" : String.valueOf(roomSequence));
+        perMessageWriter.writeLine(line);
     }
 
     public long getTotalRuntimeMs() {
@@ -115,6 +152,8 @@ public class DetailedMetricsCollector {
         System.out.println("\n=== Performance Metrics ===");
         System.out.println("Successful messages: " + successCount.sum());
         System.out.println("Error responses: " + errorResponseCount.sum());
+        System.out.println("Broadcast deliveries: " + broadcastDeliveryCount.sum());
+        System.out.println("Out-of-order broadcasts: " + outOfOrderBroadcastCount.sum());
         System.out.println("Failed messages: " + failureCount.sum());
         System.out.println("Total runtime: " + getTotalRuntimeMs() + " ms");
         System.out.println("Throughput: " + String.format("%.2f", getThroughput()) + " messages/second");
@@ -219,6 +258,8 @@ public class DetailedMetricsCollector {
         CsvWriter writer = new CsvWriter(path, "metric,value");
         writer.writeLine("successful_messages," + successCount.sum());
         writer.writeLine("error_responses," + errorResponseCount.sum());
+        writer.writeLine("broadcast_deliveries," + broadcastDeliveryCount.sum());
+        writer.writeLine("out_of_order_broadcasts," + outOfOrderBroadcastCount.sum());
         writer.writeLine("failed_messages," + failureCount.sum());
         writer.writeLine("total_runtime_ms," + getTotalRuntimeMs());
         writer.writeLine("throughput_msg_per_sec," + String.format("%.2f", getThroughput()));

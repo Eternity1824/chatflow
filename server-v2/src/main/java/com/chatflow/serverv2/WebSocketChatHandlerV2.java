@@ -74,7 +74,7 @@ public class WebSocketChatHandlerV2 extends SimpleChannelInboundHandler<WebSocke
                     extractClientIp(ctx));
             publisher.publish(queueMessage);
 
-            writeResponse(ctx, ServerResponse.success(message, serverTimestamp));
+            writeResponse(ctx, ServerResponse.successAck(message, serverTimestamp));
         } catch (Exception e) {
             String serverTimestamp = Instant.now().toString();
             writeResponse(ctx, ServerResponse.error("Invalid request: " + e.getMessage(), serverTimestamp));

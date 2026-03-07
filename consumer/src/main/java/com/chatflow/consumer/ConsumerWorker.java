@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ConsumerWorker implements Runnable, AutoCloseable {
@@ -25,6 +26,7 @@ public class ConsumerWorker implements Runnable, AutoCloseable {
     private final List<String> queues;
     private final ConsumerConfig config;
     private final RoomManager roomManager;
+    private final RoomSequenceManager roomSequenceManager;
     private final MessageDeduplicator deduplicator;
     private final ConsumerMetrics metrics;
     private final AtomicBoolean running = new AtomicBoolean(true);
@@ -37,12 +39,14 @@ public class ConsumerWorker implements Runnable, AutoCloseable {
             List<String> queues,
             ConsumerConfig config,
             RoomManager roomManager,
+            RoomSequenceManager roomSequenceManager,
             MessageDeduplicator deduplicator,
             ConsumerMetrics metrics) {
         this.workerId = workerId;
         this.queues = queues;
         this.config = config;
         this.roomManager = roomManager;
+        this.roomSequenceManager = roomSequenceManager;
         this.deduplicator = deduplicator;
         this.metrics = metrics;
     }
@@ -114,11 +118,17 @@ public class ConsumerWorker implements Runnable, AutoCloseable {
             return true;
         }
 
+        metrics.recordDedupeCheck();
         if (deduplicator.isDuplicate(message.getMessageId())) {
             metrics.recordDuplicate();
             channel.basicAck(deliveryTag, false);
             metrics.recordAcked();
             return true;
+        }
+
+        if (message.getRoomSequence() == null && message.getRoomId() != null && !message.getRoomId().isBlank()) {
+            long sequence = roomSequenceManager.nextSequence(message.getRoomId());
+            message.setRoomSequence(sequence);
         }
 
         boolean delivered = roomManager.dispatch(message);
@@ -130,12 +140,14 @@ public class ConsumerWorker implements Runnable, AutoCloseable {
 
         int retryCount = extractRetryCount(response.getProps().getHeaders());
         if (retryCount < config.getMaxRetries()) {
+            sleepRetryBackoff(retryCount + 1);
             republishWithRetry(message, retryCount + 1);
             channel.basicAck(deliveryTag, false);
             metrics.recordAcked();
             metrics.recordRetried();
         } else {
             channel.basicNack(deliveryTag, false, false);
+            metrics.recordRetriesExhausted();
             metrics.recordDropped();
         }
         return true;
@@ -179,6 +191,16 @@ public class ConsumerWorker implements Runnable, AutoCloseable {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    private void sleepRetryBackoff(int attempt) {
+        long base = Math.max(1L, config.getRetryBackoffBaseMs());
+        long max = Math.max(base, config.getRetryBackoffMaxMs());
+        long backoff = base * (1L << Math.min(20, Math.max(0, attempt - 1)));
+        long cappedBackoff = Math.min(max, backoff);
+        long jitter = ThreadLocalRandom.current().nextLong(Math.max(1L, cappedBackoff / 4));
+        long totalSleep = Math.min(max, cappedBackoff + jitter);
+        sleepQuietly(totalSleep);
     }
 
     public void shutdown() {

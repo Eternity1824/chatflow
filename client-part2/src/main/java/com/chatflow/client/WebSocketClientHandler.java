@@ -34,6 +34,7 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
         try {
             ServerResponse response = objectMapper.readValue(responseText, ServerResponse.class);
             String status = response.getStatus();
+            String responseType = response.getResponseType();
             int statusCode = "success".equalsIgnoreCase(status) ? 200 : 400;
 
             ChatMessage original = response.getOriginalMessage();
@@ -52,7 +53,27 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
             long latencyMs = sendTimestampMs >= 0 ? ackTimeMs - sendTimestampMs : -1;
             String roomId = connectionPool.getRoomIdForChannel(ctx.channel());
 
-            metrics.recordResponse(sendTimestampMs, messageType, latencyMs, statusCode, roomId, ackTimeMs, status);
+            if (ServerResponse.TYPE_BROADCAST.equalsIgnoreCase(responseType)) {
+                metrics.recordBroadcastDelivery(
+                        messageType,
+                        roomId,
+                        ackTimeMs,
+                        response.getMessageId(),
+                        response.getRoomSequence());
+                return;
+            }
+
+            metrics.recordResponse(
+                    sendTimestampMs,
+                    messageType,
+                    latencyMs,
+                    statusCode,
+                    roomId,
+                    ackTimeMs,
+                    status,
+                    responseType,
+                    response.getMessageId(),
+                    response.getRoomSequence());
         } catch (Exception e) {
             logger.warn("Failed to parse server response", e);
             metrics.recordFailure();

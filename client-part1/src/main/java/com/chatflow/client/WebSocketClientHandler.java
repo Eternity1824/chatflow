@@ -1,5 +1,7 @@
 package com.chatflow.client;
 
+import com.chatflow.protocol.ServerResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -10,6 +12,7 @@ import org.slf4j.MDC;
 
 public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
     private static final Logger logger = LoggerFactory.getLogger(WebSocketClientHandler.class);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final MetricsCollector metrics;
     private final java.util.concurrent.CountDownLatch responseLatch;
 
@@ -21,7 +24,14 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) {
         if (frame instanceof TextWebSocketFrame) {
-            String response = ((TextWebSocketFrame) frame).text();
+            String responseText = ((TextWebSocketFrame) frame).text();
+            try {
+                ServerResponse response = OBJECT_MAPPER.readValue(responseText, ServerResponse.class);
+                if (ServerResponse.TYPE_BROADCAST.equalsIgnoreCase(response.getResponseType())) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
             metrics.recordSuccess();
             if (responseLatch != null) {
                 responseLatch.countDown();

@@ -14,6 +14,8 @@ public class ConsumerMetrics {
     private final AtomicLong messagesRetried = new AtomicLong();
     private final AtomicLong messagesDropped = new AtomicLong();
     private final AtomicLong messagesDuplicate = new AtomicLong();
+    private final AtomicLong dedupeChecks = new AtomicLong();
+    private final AtomicLong retriesExhausted = new AtomicLong();
     private final AtomicLong broadcastFailures = new AtomicLong();
     private final AtomicLong parseErrors = new AtomicLong();
     private final ConcurrentHashMap<String, AtomicLong> roomDeliveries = new ConcurrentHashMap<>();
@@ -43,6 +45,14 @@ public class ConsumerMetrics {
         messagesDuplicate.incrementAndGet();
     }
 
+    public void recordDedupeCheck() {
+        dedupeChecks.incrementAndGet();
+    }
+
+    public void recordRetriesExhausted() {
+        retriesExhausted.incrementAndGet();
+    }
+
     public void recordBroadcastFailure() {
         broadcastFailures.incrementAndGet();
     }
@@ -60,6 +70,8 @@ public class ConsumerMetrics {
         snapshot.put("messagesRetried", messagesRetried.get());
         snapshot.put("messagesDropped", messagesDropped.get());
         snapshot.put("messagesDuplicate", messagesDuplicate.get());
+        snapshot.put("dedupeChecks", dedupeChecks.get());
+        snapshot.put("retriesExhausted", retriesExhausted.get());
         snapshot.put("broadcastFailures", broadcastFailures.get());
         snapshot.put("parseErrors", parseErrors.get());
         Map<String, Long> roomSnapshot = new LinkedHashMap<>();

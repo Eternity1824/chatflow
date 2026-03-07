@@ -24,6 +24,9 @@ public class QueueChatMessage {
     @JsonProperty("messageType")
     private ChatMessage.MessageType messageType;
 
+    @JsonProperty("roomSequence")
+    private Long roomSequence;
+
     @JsonProperty("serverId")
     private String serverId;
 
@@ -41,6 +44,7 @@ public class QueueChatMessage {
             String message,
             String timestamp,
             ChatMessage.MessageType messageType,
+            Long roomSequence,
             String serverId,
             String clientIp) {
         this.messageId = messageId;
@@ -50,6 +54,7 @@ public class QueueChatMessage {
         this.message = message;
         this.timestamp = timestamp;
         this.messageType = messageType;
+        this.roomSequence = roomSequence;
         this.serverId = serverId;
         this.clientIp = clientIp;
     }
@@ -68,6 +73,7 @@ public class QueueChatMessage {
                 message.getMessage(),
                 message.getTimestamp(),
                 message.getMessageType(),
+                null,
                 serverId,
                 clientIp);
     }
@@ -126,6 +132,14 @@ public class QueueChatMessage {
 
     public void setMessageType(ChatMessage.MessageType messageType) {
         this.messageType = messageType;
+    }
+
+    public Long getRoomSequence() {
+        return roomSequence;
+    }
+
+    public void setRoomSequence(Long roomSequence) {
+        this.roomSequence = roomSequence;
     }
 
     public String getServerId() {
