@@ -10,7 +10,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public class BroadcastClient {
     private static final Logger logger = LoggerFactory.getLogger(BroadcastClient.class);
@@ -44,33 +46,55 @@ public class BroadcastClient {
             return false;
         }
 
-        boolean allSucceeded = true;
+        List<CompletableFuture<Boolean>> futures = new ArrayList<>(targets.size());
         for (String target : targets) {
+            URI uri;
             try {
-                URI uri = resolveInternalBroadcastUri(target);
-                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
-                        .timeout(Duration.ofMillis(timeoutMs))
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(payload));
+                uri = resolveInternalBroadcastUri(target);
+            } catch (Exception e) {
+                logger.warn("Invalid broadcast target {} for message {}", target, message.getMessageId(), e);
+                futures.add(CompletableFuture.completedFuture(false));
+                continue;
+            }
+            futures.add(sendToTarget(uri, payload, message.getMessageId()));
+        }
 
-                if (internalToken != null && !internalToken.isBlank()) {
-                    requestBuilder.header("X-Chatflow-Token", internalToken);
-                }
-
-                HttpResponse<String> response = httpClient.send(
-                        requestBuilder.build(),
-                        HttpResponse.BodyHandlers.ofString());
-                int statusCode = response.statusCode();
-                if (statusCode < 200 || statusCode >= 300) {
-                    logger.warn("Broadcast target {} responded with status {}", uri, statusCode);
+        boolean allSucceeded = true;
+        for (CompletableFuture<Boolean> future : futures) {
+            try {
+                if (!future.join()) {
                     allSucceeded = false;
                 }
             } catch (Exception e) {
-                logger.warn("Failed broadcasting message {} to target {}", message.getMessageId(), target, e);
                 allSucceeded = false;
             }
         }
         return allSucceeded;
+    }
+
+    private CompletableFuture<Boolean> sendToTarget(URI uri, String payload, String messageId) {
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofMillis(timeoutMs))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(payload));
+
+        if (internalToken != null && !internalToken.isBlank()) {
+            requestBuilder.header("X-Chatflow-Token", internalToken);
+        }
+
+        return httpClient.sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
+                .thenApply(response -> {
+                    int statusCode = response.statusCode();
+                    if (statusCode < 200 || statusCode >= 300) {
+                        logger.warn("Broadcast target {} responded with status {}", uri, statusCode);
+                        return false;
+                    }
+                    return true;
+                })
+                .exceptionally(error -> {
+                    logger.warn("Failed broadcasting message {} to target {}", messageId, uri, error);
+                    return false;
+                });
     }
 
     private URI resolveInternalBroadcastUri(String target) {
