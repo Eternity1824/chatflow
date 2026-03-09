@@ -1,13 +1,16 @@
 package com.chatflow.consumer;
 
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class ConsumerApp {
@@ -21,6 +24,10 @@ public class ConsumerApp {
                 config.getRoomStart(),
                 config.getRoomEnd(),
                 config.getBroadcastTargets());
+        logger.info(
+                "Shard config: instanceIndex={}, instanceCount={}, shardRule=(roomId-1) % instanceCount",
+                config.getConsumerInstanceIndex(),
+                config.getConsumerInstanceCount());
         logger.info("Retry config: maxRetries={}, backoffBaseMs={}, backoffMaxMs={}",
                 config.getMaxRetries(),
                 config.getRetryBackoffBaseMs(),
@@ -36,31 +43,37 @@ public class ConsumerApp {
                 config.getDedupMaxEntries(),
                 config.getDedupTtlMs());
         RoomSequenceManager roomSequenceManager = new RoomSequenceManager();
-        BroadcastClient broadcastClient = new BroadcastClient(
+        GrpcBroadcastClient grpcClient = new GrpcBroadcastClient(
                 config.getBroadcastTargets(),
-                config.getInternalBroadcastToken(),
                 config.getBroadcastTimeoutMs());
-        RoomManager roomManager = new RoomManager(broadcastClient, metrics);
 
         List<String> queues = new ArrayList<>();
         for (int roomId = config.getRoomStart(); roomId <= config.getRoomEnd(); roomId++) {
+            if (Math.floorMod(roomId - 1, config.getConsumerInstanceCount()) != config.getConsumerInstanceIndex()) {
+                continue;
+            }
             queues.add(config.queueNameForRoom(roomId));
         }
+        logger.info("Assigned room queues for this consumer instance: {}", queues);
         List<List<String>> queueAssignments = RoomAssignment.assignQueues(queues, config.getConsumerThreads());
 
-        List<ConsumerWorker> workers = new ArrayList<>();
-        ExecutorService workerPool = Executors.newFixedThreadPool(queueAssignments.size());
+        boolean useEpoll = Epoll.isAvailable();
+        EventLoopGroup eventLoopGroup = createEventLoopGroup(useEpoll, config.getConsumerThreads());
+        logger.info("Using {} EventLoopGroup with {} threads (Protobuf+gRPC mode)", useEpoll ? "Epoll" : "NIO", config.getConsumerThreads());
+
+        List<ProtobufConsumerWorker> workers = new ArrayList<>();
         for (int i = 0; i < queueAssignments.size(); i++) {
-            ConsumerWorker worker = new ConsumerWorker(
+            ProtobufConsumerWorker worker = new ProtobufConsumerWorker(
                     i,
                     queueAssignments.get(i),
                     config,
-                    roomManager,
+                    grpcClient,
                     roomSequenceManager,
                     deduplicator,
-                    metrics);
+                    metrics,
+                    eventLoopGroup.next());
             workers.add(worker);
-            workerPool.submit(worker);
+            worker.start();
         }
 
         ConsumerHealthServer healthServer = new ConsumerHealthServer(config.getHealthPort(), metrics);
@@ -75,14 +88,22 @@ public class ConsumerApp {
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutdown requested, stopping consumer...");
-            for (ConsumerWorker worker : workers) {
+            for (ProtobufConsumerWorker worker : workers) {
                 worker.shutdown();
             }
-            workerPool.shutdownNow();
+            grpcClient.close();
+            eventLoopGroup.shutdownGracefully();
             metricsLogger.shutdownNow();
             healthServer.close();
         }));
 
-        workerPool.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+        eventLoopGroup.terminationFuture().sync();
+    }
+
+    private static EventLoopGroup createEventLoopGroup(boolean useEpoll, int threads) {
+        if (useEpoll) {
+            return threads > 0 ? new EpollEventLoopGroup(threads) : new EpollEventLoopGroup();
+        }
+        return threads > 0 ? new NioEventLoopGroup(threads) : new NioEventLoopGroup();
     }
 }

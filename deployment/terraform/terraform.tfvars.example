@@ -11,10 +11,19 @@ key_name = ""
 
 # Assignment load-balanced scenarios: set to 1, 2, then 4 for tests.
 server_count = 4
+consumer_count = 4
 
 server_instance_type   = "t3.small"
 consumer_instance_type = "t3.small"
 rabbit_instance_type   = "t3.small"
+
+# Internal server gRPC port for consumer fan-out.
+server_grpc_port = 9090
+
+# Consumer internal broadcast format:
+# - "grpc" => "server-private-ip:9090"
+# - "http" => "http://server-private-ip:8080"
+consumer_broadcast_mode = "grpc"
 
 chatflow_internal_token = "replace-with-strong-token"
 rabbit_username         = "guest"

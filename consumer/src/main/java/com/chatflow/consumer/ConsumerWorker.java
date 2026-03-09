@@ -65,23 +65,25 @@ public class ConsumerWorker implements Runnable, AutoCloseable {
 
         int prefetch = Math.max(1, config.getPrefetchCount());
         int queueCount = Math.max(1, queues.size());
-        this.maxInFlight = Math.max(prefetch, prefetch * queueCount);
+        this.maxInFlight = Math.max(1, config.getGlobalMaxInFlight());
         int queueCapacity = Math.max(256, prefetch * queueCount * 2);
         this.deliveryQueue = new LinkedBlockingQueue<>(queueCapacity);
         this.ackQueue = new LinkedBlockingQueue<>(queueCapacity);
         this.inFlightSemaphore = new Semaphore(maxInFlight);
+        int roomMaxInFlight = Math.max(1, config.getRoomMaxInFlight());
         for (String queueName : queues) {
-            this.queueSemaphores.put(queueName, new Semaphore(1));
+            this.queueSemaphores.put(queueName, new Semaphore(roomMaxInFlight));
         }
     }
 
     @Override
     public void run() {
         logger.info(
-                "Consumer worker {} started with queues {} in push mode (prefetch={}, maxInFlight={})",
+                "Consumer worker {} started with queues {} in push mode (prefetch={}, roomMaxInFlight={}, globalMaxInFlight={})",
                 workerId,
                 queues,
                 config.getPrefetchCount(),
+                config.getRoomMaxInFlight(),
                 maxInFlight);
 
         if (queues == null || queues.isEmpty()) {

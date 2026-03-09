@@ -31,10 +31,15 @@ locals {
     ManagedBy   = "Terraform"
   }
 
-  subnet_ids        = sort(data.aws_subnets.default.ids)
-  key_name_or_null  = var.key_name == "" ? null : var.key_name
+  subnet_ids         = sort(data.aws_subnets.default.ids)
+  key_name_or_null   = var.key_name == "" ? null : var.key_name
   server_private_ips = aws_instance.server[*].private_ip
-  broadcast_targets = [for ip in local.server_private_ips : "http://${ip}:${var.chat_port}"]
+  broadcast_targets = [
+    for ip in local.server_private_ips :
+    var.consumer_broadcast_mode == "grpc"
+    ? "${ip}:${var.server_grpc_port}"
+    : "http://${ip}:${var.chat_port}"
+  ]
 }
 
 resource "aws_security_group" "alb" {
@@ -78,6 +83,14 @@ resource "aws_security_group" "server" {
     protocol        = "tcp"
     security_groups = [aws_security_group.consumer.id]
     description     = "Consumer internal broadcast"
+  }
+
+  ingress {
+    from_port       = var.server_grpc_port
+    to_port         = var.server_grpc_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.consumer.id]
+    description     = "Consumer internal gRPC broadcast"
   }
 
   dynamic "ingress" {
@@ -261,20 +274,21 @@ resource "aws_instance" "server" {
   key_name                    = local.key_name_or_null
 
   user_data = templatefile("${path.module}/user_data/server.sh.tftpl", {
-    server_id             = "server-${count.index + 1}"
-    chat_port             = var.chat_port
-    internal_token        = var.chatflow_internal_token
-    rabbit_host           = aws_instance.rabbit.private_ip
-    rabbit_port           = var.rabbit_port
-    rabbit_username       = var.rabbit_username
-    rabbit_password       = var.rabbit_password
-    rabbit_vhost          = var.rabbit_vhost
-    rabbit_exchange       = var.rabbit_exchange
-    room_start            = var.room_start
-    room_end              = var.room_end
-    queue_message_ttl_ms  = var.queue_message_ttl_ms
-    queue_max_length      = var.queue_max_length
-    server_jar_url        = var.server_jar_url
+    server_id            = "server-${count.index + 1}"
+    chat_port            = var.chat_port
+    grpc_port            = var.server_grpc_port
+    internal_token       = var.chatflow_internal_token
+    rabbit_host          = aws_instance.rabbit.private_ip
+    rabbit_port          = var.rabbit_port
+    rabbit_username      = var.rabbit_username
+    rabbit_password      = var.rabbit_password
+    rabbit_vhost         = var.rabbit_vhost
+    rabbit_exchange      = var.rabbit_exchange
+    room_start           = var.room_start
+    room_end             = var.room_end
+    queue_message_ttl_ms = var.queue_message_ttl_ms
+    queue_max_length     = var.queue_max_length
+    server_jar_url       = var.server_jar_url
   })
 
   root_block_device {
@@ -293,35 +307,38 @@ resource "aws_lb_target_group_attachment" "server_attach" {
 }
 
 resource "aws_instance" "consumer" {
+  count                       = var.consumer_count
   ami                         = data.aws_ami.ubuntu_24_04.id
   instance_type               = var.consumer_instance_type
-  subnet_id                   = local.subnet_ids[0]
+  subnet_id                   = local.subnet_ids[count.index % length(local.subnet_ids)]
   vpc_security_group_ids      = [aws_security_group.consumer.id]
   associate_public_ip_address = var.associate_public_ip
   key_name                    = local.key_name_or_null
 
   user_data = templatefile("${path.module}/user_data/consumer.sh.tftpl", {
-    rabbit_host                      = aws_instance.rabbit.private_ip
-    rabbit_port                      = var.rabbit_port
-    rabbit_username                  = var.rabbit_username
-    rabbit_password                  = var.rabbit_password
-    rabbit_vhost                     = var.rabbit_vhost
-    rabbit_exchange                  = var.rabbit_exchange
-    room_start                       = var.room_start
-    room_end                         = var.room_end
-    queue_message_ttl_ms             = var.queue_message_ttl_ms
-    queue_max_length                 = var.queue_max_length
-    consumer_threads                 = var.consumer_threads
-    consumer_prefetch                = var.consumer_prefetch
-    consumer_max_retries             = var.consumer_max_retries
-    consumer_retry_backoff_base_ms   = var.consumer_retry_backoff_base_ms
-    consumer_retry_backoff_max_ms    = var.consumer_retry_backoff_max_ms
-    consumer_health_port             = var.consumer_health_port
-    consumer_dedup_max_entries       = var.consumer_dedup_max_entries
-    consumer_dedup_ttl_ms            = var.consumer_dedup_ttl_ms
-    internal_token                   = var.chatflow_internal_token
-    broadcast_targets                = join(",", local.broadcast_targets)
-    consumer_jar_url                 = var.consumer_jar_url
+    rabbit_host                    = aws_instance.rabbit.private_ip
+    rabbit_port                    = var.rabbit_port
+    rabbit_username                = var.rabbit_username
+    rabbit_password                = var.rabbit_password
+    rabbit_vhost                   = var.rabbit_vhost
+    rabbit_exchange                = var.rabbit_exchange
+    room_start                     = var.room_start
+    room_end                       = var.room_end
+    queue_message_ttl_ms           = var.queue_message_ttl_ms
+    queue_max_length               = var.queue_max_length
+    consumer_threads               = var.consumer_threads
+    consumer_prefetch              = var.consumer_prefetch
+    consumer_max_retries           = var.consumer_max_retries
+    consumer_retry_backoff_base_ms = var.consumer_retry_backoff_base_ms
+    consumer_retry_backoff_max_ms  = var.consumer_retry_backoff_max_ms
+    consumer_health_port           = var.consumer_health_port
+    consumer_dedup_max_entries     = var.consumer_dedup_max_entries
+    consumer_dedup_ttl_ms          = var.consumer_dedup_ttl_ms
+    internal_token                 = var.chatflow_internal_token
+    broadcast_targets              = join(",", local.broadcast_targets)
+    consumer_instance_index        = count.index
+    consumer_instance_count        = var.consumer_count
+    consumer_jar_url               = var.consumer_jar_url
   })
 
   root_block_device {
@@ -331,5 +348,5 @@ resource "aws_instance" "consumer" {
 
   depends_on = [aws_instance.server]
 
-  tags = merge(local.tags, { Name = "${var.name_prefix}-consumer" })
+  tags = merge(local.tags, { Name = "${var.name_prefix}-consumer-${count.index + 1}" })
 }

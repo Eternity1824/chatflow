@@ -21,8 +21,13 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
     implementation(project(":common"))
+    implementation("io.netty:netty-all:4.2.8.Final")
+    implementation("io.netty:netty-transport-native-epoll:4.2.8.Final:linux-x86_64")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.15.2")
     implementation("com.rabbitmq:amqp-client:5.20.0")
+    implementation("io.grpc:grpc-netty:1.60.0")
+    implementation("io.grpc:grpc-protobuf:1.60.0")
+    implementation("io.grpc:grpc-stub:1.60.0")
 
     implementation("org.apache.logging.log4j:log4j-api:2.23.1")
     implementation("org.apache.logging.log4j:log4j-core:2.23.1")

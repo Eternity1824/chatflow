@@ -50,6 +50,16 @@ variable "server_count" {
   }
 }
 
+variable "consumer_count" {
+  description = "Number of consumer instances (recommended: align with server_count for room sharding)."
+  type        = number
+  default     = 1
+  validation {
+    condition     = var.consumer_count >= 1 && var.consumer_count <= 20
+    error_message = "consumer_count must be between 1 and 20."
+  }
+}
+
 variable "server_instance_type" {
   description = "EC2 instance type for ChatFlow server nodes."
   type        = string
@@ -90,6 +100,12 @@ variable "chat_port" {
   description = "Server WebSocket/HTTP port."
   type        = number
   default     = 8080
+}
+
+variable "server_grpc_port" {
+  description = "Server internal gRPC broadcast port."
+  type        = number
+  default     = 9090
 }
 
 variable "consumer_health_port" {
@@ -206,6 +222,16 @@ variable "consumer_dedup_ttl_ms" {
   description = "In-memory dedup TTL (ms)."
   type        = number
   default     = 120000
+}
+
+variable "consumer_broadcast_mode" {
+  description = "Internal broadcast target mode for consumer: grpc (host:port) or http (http://host:port)."
+  type        = string
+  default     = "grpc"
+  validation {
+    condition     = contains(["grpc", "http"], var.consumer_broadcast_mode)
+    error_message = "consumer_broadcast_mode must be either 'grpc' or 'http'."
+  }
 }
 
 variable "server_jar_url" {

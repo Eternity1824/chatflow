@@ -10,6 +10,7 @@ mkdir -p /etc/chatflow /opt/chatflow /var/log/chatflow
 cat >/etc/chatflow/server-v2.env <<'EOF'
 CHATFLOW_SERVER_ID=${server_id}
 CHATFLOW_INTERNAL_TOKEN=${internal_token}
+CHATFLOW_GRPC_PORT=${grpc_port}
 CHATFLOW_RABBIT_HOST=${rabbit_host}
 CHATFLOW_RABBIT_PORT=${rabbit_port}
 CHATFLOW_RABBIT_USERNAME=${rabbit_username}
@@ -33,7 +34,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/chatflow/server-v2.env
-ExecStart=/bin/bash -lc 'java -jar /opt/chatflow/server-v2-all.jar 8080 0 $${CHATFLOW_SERVER_ID}'
+ExecStart=/bin/bash -lc 'java -jar /opt/chatflow/server-v2-all.jar ${chat_port} 0 $${CHATFLOW_SERVER_ID} $${CHATFLOW_INTERNAL_TOKEN} $${CHATFLOW_GRPC_PORT}'
 Restart=always
 RestartSec=2
 StandardOutput=append:/var/log/chatflow/server-v2.log

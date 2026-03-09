@@ -1,7 +1,7 @@
 package com.chatflow.serverv2;
 
 import com.chatflow.protocol.QueueChatMessage;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.chatflow.protocol.ProtobufConverter;
 import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.MessageProperties;
@@ -9,13 +9,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class RabbitMqPublisher implements AutoCloseable {
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Logger logger = LoggerFactory.getLogger(RabbitMqPublisher.class);
 
     private final RabbitMqConfig config;
@@ -44,12 +42,14 @@ public class RabbitMqPublisher implements AutoCloseable {
         long sequenceNumber = -1L;
         try {
             channel = channelPool.borrowChannel();
-            byte[] payload = OBJECT_MAPPER.writeValueAsString(message).getBytes(StandardCharsets.UTF_8);
+            com.chatflow.protocol.proto.QueueChatMessage protoMessage = ProtobufConverter.toProto(message);
+            byte[] payload = protoMessage.toByteArray();
             String routingKey = "room." + message.getRoomId();
-            AMQP.BasicProperties properties = MessageProperties.PERSISTENT_TEXT_PLAIN.builder()
+            AMQP.BasicProperties properties = MessageProperties.PERSISTENT_BASIC.builder()
                     .messageId(message.getMessageId())
                     .timestamp(new java.util.Date())
                     .type(message.getMessageType().name())
+                    .contentType("application/x-protobuf")
                     .build();
             sequenceNumber = channel.getNextPublishSeqNo();
             CompletableFuture<Void> confirmFuture = channelPool.registerPublishConfirm(channel, sequenceNumber);

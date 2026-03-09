@@ -30,7 +30,7 @@ public class ChatServerV2 {
     private final String serverId;
     private final String internalToken;
     private final RabbitMqPublisher publisher;
-    private final RoomSessionRegistry roomSessionRegistry;
+    private RoomSessionRegistry roomSessionRegistry;
 
     public ChatServerV2(
             int port,
@@ -43,7 +43,6 @@ public class ChatServerV2 {
         this.serverId = serverId;
         this.internalToken = internalToken;
         this.publisher = publisher;
-        this.roomSessionRegistry = new RoomSessionRegistry();
     }
 
     public void start() throws Exception {
@@ -107,6 +106,7 @@ public class ChatServerV2 {
 
     public static void main(String[] args) throws Exception {
         int port = 8080;
+        int grpcPort = 9090;
         int workerThreads = 0;
         String serverId = System.getenv().getOrDefault("CHATFLOW_SERVER_ID", "server-v2-local");
         String internalToken = System.getenv().getOrDefault("CHATFLOW_INTERNAL_TOKEN", "");
@@ -123,10 +123,24 @@ public class ChatServerV2 {
         if (args.length > 3) {
             internalToken = args[3];
         }
+        if (args.length > 4) {
+            grpcPort = Integer.parseInt(args[4]);
+        }
 
         RabbitMqConfig config = RabbitMqConfig.fromEnvironment();
+        RoomSessionRegistry roomSessionRegistry = new RoomSessionRegistry();
+        
+        InternalBroadcastGrpcService grpcService = new InternalBroadcastGrpcService(roomSessionRegistry, internalToken);
+        GrpcServerManager grpcServer = new GrpcServerManager(grpcPort, grpcService);
+        grpcServer.start();
+        logger.info("gRPC internal broadcast service available on port {}", grpcPort);
+
         try (RabbitMqPublisher publisher = new RabbitMqPublisher(config)) {
-            new ChatServerV2(port, workerThreads, serverId, internalToken, publisher).start();
+            ChatServerV2 server = new ChatServerV2(port, workerThreads, serverId, internalToken, publisher);
+            server.roomSessionRegistry = roomSessionRegistry;
+            server.start();
+        } finally {
+            grpcServer.close();
         }
     }
 }

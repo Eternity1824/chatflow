@@ -21,6 +21,8 @@ public class ConsumerConfig {
     private final int prefetchCount;
     private final int roomStart;
     private final int roomEnd;
+    private final int consumerInstanceIndex;
+    private final int consumerInstanceCount;
     private final int maxRetries;
     private final long retryBackoffBaseMs;
     private final long retryBackoffMaxMs;
@@ -34,6 +36,8 @@ public class ConsumerConfig {
     private final List<String> broadcastTargets;
     private final String internalBroadcastToken;
     private final long broadcastTimeoutMs;
+    private final int roomMaxInFlight;
+    private final int globalMaxInFlight;
 
     public ConsumerConfig(
             String rabbitHost,
@@ -46,6 +50,8 @@ public class ConsumerConfig {
             int prefetchCount,
             int roomStart,
             int roomEnd,
+            int consumerInstanceIndex,
+            int consumerInstanceCount,
             int maxRetries,
             long retryBackoffBaseMs,
             long retryBackoffMaxMs,
@@ -58,7 +64,9 @@ public class ConsumerConfig {
             long dedupTtlMs,
             List<String> broadcastTargets,
             String internalBroadcastToken,
-            long broadcastTimeoutMs) {
+            long broadcastTimeoutMs,
+            int roomMaxInFlight,
+            int globalMaxInFlight) {
         this.rabbitHost = rabbitHost;
         this.rabbitPort = rabbitPort;
         this.rabbitUsername = rabbitUsername;
@@ -69,6 +77,15 @@ public class ConsumerConfig {
         this.prefetchCount = prefetchCount;
         this.roomStart = roomStart;
         this.roomEnd = roomEnd;
+        this.consumerInstanceCount = Math.max(1, consumerInstanceCount);
+        int normalizedIndex = consumerInstanceIndex;
+        if (normalizedIndex < 0) {
+            normalizedIndex = 0;
+        }
+        if (normalizedIndex >= this.consumerInstanceCount) {
+            normalizedIndex = normalizedIndex % this.consumerInstanceCount;
+        }
+        this.consumerInstanceIndex = normalizedIndex;
         this.maxRetries = maxRetries;
         this.retryBackoffBaseMs = retryBackoffBaseMs;
         this.retryBackoffMaxMs = retryBackoffMaxMs;
@@ -82,6 +99,8 @@ public class ConsumerConfig {
         this.broadcastTargets = broadcastTargets;
         this.internalBroadcastToken = internalBroadcastToken;
         this.broadcastTimeoutMs = broadcastTimeoutMs;
+        this.roomMaxInFlight = roomMaxInFlight;
+        this.globalMaxInFlight = globalMaxInFlight;
     }
 
     public static ConsumerConfig fromEnvironment() {
@@ -101,6 +120,8 @@ public class ConsumerConfig {
                 intEnv("CHATFLOW_CONSUMER_PREFETCH", 100),
                 roomStart,
                 roomEnd,
+                intEnv("CHATFLOW_CONSUMER_INSTANCE_INDEX", 0),
+                intEnv("CHATFLOW_CONSUMER_INSTANCE_COUNT", 1),
                 intEnv("CHATFLOW_CONSUMER_MAX_RETRIES", 3),
                 longEnv("CHATFLOW_CONSUMER_RETRY_BACKOFF_BASE_MS", 25L),
                 longEnv("CHATFLOW_CONSUMER_RETRY_BACKOFF_MAX_MS", 2_000L),
@@ -113,7 +134,9 @@ public class ConsumerConfig {
                 longEnv("CHATFLOW_CONSUMER_DEDUP_TTL_MS", 120_000L),
                 parseTargets(env("CHATFLOW_BROADCAST_TARGETS", "http://localhost:8080")),
                 env("CHATFLOW_INTERNAL_TOKEN", ""),
-                longEnv("CHATFLOW_BROADCAST_TIMEOUT_MS", 2_000L));
+                longEnv("CHATFLOW_BROADCAST_TIMEOUT_MS", 2_000L),
+                intEnv("CHATFLOW_ROOM_MAX_INFLIGHT", 8),
+                intEnv("CHATFLOW_GLOBAL_MAX_INFLIGHT", 500));
     }
 
     private static String env(String key, String defaultValue) {
@@ -199,6 +222,14 @@ public class ConsumerConfig {
         return roomEnd;
     }
 
+    public int getConsumerInstanceIndex() {
+        return consumerInstanceIndex;
+    }
+
+    public int getConsumerInstanceCount() {
+        return consumerInstanceCount;
+    }
+
     public int getMaxRetries() {
         return maxRetries;
     }
@@ -249,5 +280,13 @@ public class ConsumerConfig {
 
     public long getBroadcastTimeoutMs() {
         return broadcastTimeoutMs;
+    }
+
+    public int getRoomMaxInFlight() {
+        return roomMaxInFlight;
+    }
+
+    public int getGlobalMaxInFlight() {
+        return globalMaxInFlight;
     }
 }

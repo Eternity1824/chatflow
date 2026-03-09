@@ -71,7 +71,8 @@ public class RoomSessionRegistry {
                 queueMessage.getRoomId(),
                 queueMessage.getRoomSequence());
         String payload = OBJECT_MAPPER.writeValueAsString(response);
-        group.writeAndFlush(new TextWebSocketFrame(payload));
+        group.write(new TextWebSocketFrame(payload));
+        group.flush();
         return group.size();
     }
 

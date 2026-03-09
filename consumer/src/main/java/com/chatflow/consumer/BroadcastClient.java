@@ -64,7 +64,11 @@ public class BroadcastClient {
                 futures.add(CompletableFuture.completedFuture(false));
                 continue;
             }
-            futures.add(sendToTarget(uri, payload, message.getMessageId()));
+            futures.add(sendToTarget(
+                    uri,
+                    payload.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "application/json",
+                    message.getMessageId()));
         }
 
         CompletableFuture<?>[] array = futures.toArray(new CompletableFuture[0]);
@@ -80,17 +84,53 @@ public class BroadcastClient {
                 });
     }
 
-    private CompletableFuture<Boolean> sendToTarget(URI uri, String payload, String messageId) {
+    public CompletableFuture<Boolean> broadcastProtoAsync(com.chatflow.protocol.proto.QueueChatMessage message) {
+        if (targets == null || targets.isEmpty()) {
+            logger.error("No broadcast targets configured. Set CHATFLOW_BROADCAST_TARGETS.");
+            return CompletableFuture.completedFuture(false);
+        }
+        if (message == null) {
+            return CompletableFuture.completedFuture(false);
+        }
+
+        byte[] payload = message.toByteArray();
+        List<CompletableFuture<Boolean>> futures = new ArrayList<>(targets.size());
+        for (String target : targets) {
+            URI uri;
+            try {
+                uri = resolveInternalBroadcastUri(target);
+            } catch (Exception e) {
+                logger.warn("Invalid broadcast target {} for message {}", target, message.getMessageId(), e);
+                futures.add(CompletableFuture.completedFuture(false));
+                continue;
+            }
+            futures.add(sendToTarget(uri, payload, "application/x-protobuf", message.getMessageId()));
+        }
+
+        CompletableFuture<?>[] array = futures.toArray(new CompletableFuture[0]);
+        return CompletableFuture.allOf(array)
+                .handle((unused, error) -> {
+                    boolean allSucceeded = error == null;
+                    for (CompletableFuture<Boolean> future : futures) {
+                        if (!future.getNow(false)) {
+                            allSucceeded = false;
+                        }
+                    }
+                    return allSucceeded;
+                });
+    }
+
+    private CompletableFuture<Boolean> sendToTarget(URI uri, byte[] payload, String contentType, String messageId) {
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofMillis(timeoutMs))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(payload));
+                .header("Content-Type", contentType)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload));
 
         if (internalToken != null && !internalToken.isBlank()) {
             requestBuilder.header("X-Chatflow-Token", internalToken);
         }
 
-        return httpClient.sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
+        return httpClient.sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.discarding())
                 .thenApply(response -> {
                     int statusCode = response.statusCode();
                     if (statusCode < 200 || statusCode >= 300) {

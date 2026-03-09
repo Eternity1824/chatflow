@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package com.chatflow.protocol;
+
+option java_multiple_files = true;
+option java_package = "com.chatflow.protocol.proto";
+option java_outer_classname = "ChatFlowProto";
+
+enum MessageType {
+  TEXT = 0;
+  JOIN = 1;
+  LEAVE = 2;
+}
+
+message QueueChatMessage {
+  string message_id = 1;
+  string room_id = 2;
+  string user_id = 3;
+  string username = 4;
+  string message = 5;
+  string timestamp = 6;
+  MessageType message_type = 7;
+  int64 room_sequence = 8;
+  string server_id = 9;
+  string client_ip = 10;
+}
+
+service InternalBroadcast {
+  rpc Broadcast(BroadcastRequest) returns (BroadcastResponse);
+}
+
+message BroadcastRequest {
+  QueueChatMessage message = 1;
+}
+
+message BroadcastResponse {
+  bool success = 1;
+  int32 delivered_count = 2;
+  string error = 3;
+}

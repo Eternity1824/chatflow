@@ -25,7 +25,7 @@ The deployed system separates concerns into ingress, queueing, and fan-out layer
 2. ALB forwards/sticks each connection to one `server-v2` instance.
 3. `server-v2` validates incoming chat messages and publishes them to RabbitMQ.
 4. RabbitMQ routes messages by room (`room.{roomId}`).
-5. `consumer` workers read room queues and call each server's internal broadcast API.
+5. `consumer` workers read room queues (push mode), process protobuf payloads, and call each server's internal gRPC broadcast service.
 6. Each `server-v2` instance broadcasts to its local in-memory room sessions.
 
 ```text
@@ -53,10 +53,10 @@ server-v2 #1           server-v2 #2          server-v2 #N
        \_______________________________/
                       |
                       v
-             Consumer worker pool
+              Consumer worker pool
                       |
                       v
-      HTTP POST /internal/broadcast (all servers)
+      gRPC InternalBroadcast.Broadcast (all servers)
                       |
                       v
         Local room broadcast to WebSocket sessions
@@ -73,18 +73,19 @@ server-v2 #1           server-v2 #2          server-v2 #N
    - `messageId` (UUID)
    - `roomId`, `userId`, `username`, `message`, `timestamp`, `messageType`
    - `serverId`, `clientIp`
-5. `RabbitMqPublisher` publishes to `chat.exchange` with routing key `room.{roomId}`.
-6. Publisher confirm (`waitForConfirmsOrDie`) ensures broker acceptance before success ACK.
+5. `RabbitMqPublisher` converts message to protobuf bytes and publishes to `chat.exchange` with routing key `room.{roomId}`.
+6. Publisher confirm is handled with async confirm tracking (configurable sync wait can still be enabled).
 
 #### B. Consumer path (queue -> client broadcast)
 
-1. `ConsumerWorker` polls assigned queues with manual ack (`basicGet(..., false)`).
-2. Payload is deserialized; malformed payloads are ACKed and dropped.
-3. Dedup check (`messageId`) avoids duplicate re-delivery side effects.
+1. `ProtobufConsumerWorker` subscribes queues with `basicConsume(..., autoAck=false)` and per-worker `basicQos(prefetch)`.
+2. Payload is parsed as protobuf; malformed payloads are ACKed and dropped.
+3. Dedup check (`messageId`) avoids duplicate side effects.
 4. If missing, room sequence is assigned by `RoomSequenceManager`.
-5. `BroadcastClient` POSTs message to each server's `/internal/broadcast` endpoint.
-6. On success: queue message is ACKed.
-7. On failure: message is retried with exponential backoff + jitter (up to max retries), then dropped with `NACK(requeue=false)` when exhausted.
+5. Delivery enters per-room pending queue; worker dispatches when `roomMaxInFlight` and `globalMaxInFlight` allow.
+6. `GrpcBroadcastClient` sends protobuf message to each server gRPC endpoint.
+7. On success: queue message is ACKed.
+8. On failure: retry with exponential backoff + jitter; if retries exhausted, `NACK(requeue=false)`.
 
 ### 2.3 Queue Topology Design
 
@@ -111,7 +112,8 @@ This topology isolates room traffic, keeps ordering naturally scoped per queue, 
 - Worker model:
   - one RabbitMQ connection + channel per worker
   - configurable prefetch (`basicQos`)
-  - poll loop over assigned room queues
+  - event-driven callback (`basicConsume`) on Netty EventLoop
+  - per-room pending queue + inflight gating
 - Shared state (thread-safe):
   - dedup cache (`MessageDeduplicator`)
   - per-room sequence counters (`RoomSequenceManager`)
@@ -120,7 +122,23 @@ This topology isolates room traffic, keeps ordering naturally scoped per queue, 
   - `/health` returns `OK`
   - `/metrics` exports JSON counters
 
-Note: scaling is currently configuration-driven (change thread count / instance count), not automatic runtime autoscaling.
+Note: scaling is configuration-driven (threads + instance count + room shard assignment), not full autoscaling yet.
+
+### 2.4.1 Inflight Strategy (Why `inflight=8`, and why keep `inflight=1`)
+
+We use two operation modes intentionally:
+
+- Throughput mode (`CHATFLOW_ROOM_MAX_INFLIGHT=8`):
+  - goal: maximize queue drain rate and overall throughput
+  - tradeoff: room-local delivery order may be relaxed under bursty load
+  - mitigation: include room sequence in payload and let client reorder by sequence when needed
+
+- Strict-order mode (`CHATFLOW_ROOM_MAX_INFLIGHT=1`):
+  - goal: preserve room-local processing order in consumer path
+  - tradeoff: lower max throughput due to serialized per-room dispatch
+  - use: validation runs and requirement-focused evidence
+
+This dual-mode strategy keeps one profile for peak performance tuning and one profile for strict room-order guarantee.
 
 ### 2.5 Load Balancing Configuration
 
@@ -159,6 +177,31 @@ Infrastructure is provisioned with Terraform (`deployment/terraform`):
 - Periodic metrics logging and `/metrics` endpoint for quick diagnosis.
 - Graceful shutdown hooks close workers and servers.
 
+### 2.7 Multi-Consumer Scaling Plan and Terraform Impact
+
+Given the fixed room range (`1..20`), horizontal scaling is done by room sharding instead of random queue competition.
+
+Recommended shard rule:
+- `owner = (roomId - 1) % consumer_instance_count`
+- consumer instance `i` only consumes rooms where `owner == i`
+
+Benefits:
+- predictable load split
+- better control of room-local ordering semantics
+- simpler bottleneck analysis per shard
+
+Terraform/deployment impact:
+- add `consumer_count` (number of consumer EC2 instances)
+- pass shard env vars per consumer instance:
+  - `CHATFLOW_CONSUMER_INSTANCE_INDEX`
+  - `CHATFLOW_CONSUMER_INSTANCE_COUNT`
+- for gRPC internal fan-out, ensure security group allows `consumer -> server:9090`
+
+For assignment runs, we plan:
+- 1 server scenario -> 1 consumer shard
+- 2 server scenario -> 2 consumer shards
+- 4 server scenario -> 4 consumer shards
+
 ## 3. Next Sections To Fill Later
 
 The following sections are intentionally left for your experiment outputs:
@@ -168,4 +211,3 @@ The following sections are intentionally left for your experiment outputs:
 - RabbitMQ console screenshots (queue depth and publish/consume rates)
 - ALB distribution screenshots/metrics
 - Final tuning decisions (thread counts, prefetch, retry settings)
-
