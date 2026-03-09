@@ -1,0 +1,17 @@
+jvmOpts: "-Xms512m -Xmx1g"
+client:
+  serverUrl: "ws://chatflow-a2-alb-1277626986.us-west-2.elb.amazonaws.com/chat"
+  totalMessages: 20000
+  warmupThreads: 16
+  warmupMessagesPerThread: 500
+  mainThreads: 32
+  targetQps: 1000
+  connectionsPerRoom: 1
+  handshakeTimeoutSeconds: 20
+  maxConcurrentHandshakes: 24
+  handshakeRetryDelayMs: 10
+  responseWaitSeconds: 180
+  batchSize: 100
+  batchMaxBytes: 65536
+  flushIntervalMs: 2
+  flushSync: false

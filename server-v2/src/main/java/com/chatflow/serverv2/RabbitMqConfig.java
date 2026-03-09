@@ -22,6 +22,9 @@ public class RabbitMqConfig {
     private final boolean circuitBreakerEnabled;
     private final int circuitBreakerFailureThreshold;
     private final long circuitBreakerOpenDurationMs;
+    private final boolean publisherConfirmAwait;
+    private final long publisherConfirmTimeoutMs;
+    private final int publisherConfirmMaxPending;
 
     public RabbitMqConfig(
             String host,
@@ -37,7 +40,10 @@ public class RabbitMqConfig {
             int queueMaxLength,
             boolean circuitBreakerEnabled,
             int circuitBreakerFailureThreshold,
-            long circuitBreakerOpenDurationMs) {
+            long circuitBreakerOpenDurationMs,
+            boolean publisherConfirmAwait,
+            long publisherConfirmTimeoutMs,
+            int publisherConfirmMaxPending) {
         this.host = host;
         this.port = port;
         this.username = username;
@@ -52,6 +58,9 @@ public class RabbitMqConfig {
         this.circuitBreakerEnabled = circuitBreakerEnabled;
         this.circuitBreakerFailureThreshold = circuitBreakerFailureThreshold;
         this.circuitBreakerOpenDurationMs = circuitBreakerOpenDurationMs;
+        this.publisherConfirmAwait = publisherConfirmAwait;
+        this.publisherConfirmTimeoutMs = publisherConfirmTimeoutMs;
+        this.publisherConfirmMaxPending = publisherConfirmMaxPending;
     }
 
     public static RabbitMqConfig fromEnvironment() {
@@ -74,7 +83,10 @@ public class RabbitMqConfig {
                 Integer.parseInt(env("CHATFLOW_QUEUE_MAX_LENGTH", "10000")),
                 Boolean.parseBoolean(env("CHATFLOW_CIRCUIT_BREAKER_ENABLED", "true")),
                 Integer.parseInt(env("CHATFLOW_CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")),
-                Long.parseLong(env("CHATFLOW_CIRCUIT_BREAKER_OPEN_MS", "5000")));
+                Long.parseLong(env("CHATFLOW_CIRCUIT_BREAKER_OPEN_MS", "5000")),
+                Boolean.parseBoolean(env("CHATFLOW_PUBLISH_CONFIRM_AWAIT", "false")),
+                Long.parseLong(env("CHATFLOW_PUBLISH_CONFIRM_TIMEOUT_MS", "5000")),
+                Integer.parseInt(env("CHATFLOW_PUBLISH_CONFIRM_MAX_PENDING", "4096")));
     }
 
     private static String env(String key, String defaultValue) {
@@ -139,5 +151,17 @@ public class RabbitMqConfig {
 
     public long getCircuitBreakerOpenDurationMs() {
         return circuitBreakerOpenDurationMs;
+    }
+
+    public boolean isPublisherConfirmAwait() {
+        return publisherConfirmAwait;
+    }
+
+    public long getPublisherConfirmTimeoutMs() {
+        return publisherConfirmTimeoutMs;
+    }
+
+    public int getPublisherConfirmMaxPending() {
+        return publisherConfirmMaxPending;
     }
 }

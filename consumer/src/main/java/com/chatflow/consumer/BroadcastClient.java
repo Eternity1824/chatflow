@@ -33,9 +33,17 @@ public class BroadcastClient {
     }
 
     public boolean broadcast(QueueChatMessage message) {
+        try {
+            return broadcastAsync(message).join();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public CompletableFuture<Boolean> broadcastAsync(QueueChatMessage message) {
         if (targets == null || targets.isEmpty()) {
             logger.error("No broadcast targets configured. Set CHATFLOW_BROADCAST_TARGETS.");
-            return false;
+            return CompletableFuture.completedFuture(false);
         }
 
         String payload;
@@ -43,7 +51,7 @@ public class BroadcastClient {
             payload = OBJECT_MAPPER.writeValueAsString(message);
         } catch (Exception e) {
             logger.warn("Failed to serialize queue message {}", message.getMessageId(), e);
-            return false;
+            return CompletableFuture.completedFuture(false);
         }
 
         List<CompletableFuture<Boolean>> futures = new ArrayList<>(targets.size());
@@ -59,17 +67,17 @@ public class BroadcastClient {
             futures.add(sendToTarget(uri, payload, message.getMessageId()));
         }
 
-        boolean allSucceeded = true;
-        for (CompletableFuture<Boolean> future : futures) {
-            try {
-                if (!future.join()) {
-                    allSucceeded = false;
-                }
-            } catch (Exception e) {
-                allSucceeded = false;
-            }
-        }
-        return allSucceeded;
+        CompletableFuture<?>[] array = futures.toArray(new CompletableFuture[0]);
+        return CompletableFuture.allOf(array)
+                .handle((unused, error) -> {
+                    boolean allSucceeded = error == null;
+                    for (CompletableFuture<Boolean> future : futures) {
+                        if (!future.getNow(false)) {
+                            allSucceeded = false;
+                        }
+                    }
+                    return allSucceeded;
+                });
     }
 
     private CompletableFuture<Boolean> sendToTarget(URI uri, String payload, String messageId) {

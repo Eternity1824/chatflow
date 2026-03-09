@@ -33,7 +33,7 @@ After=network.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/chatflow/server-v2.env
-ExecStart=/bin/bash -lc 'java -jar /opt/chatflow/server-v2-all.jar 8080 0 ${CHATFLOW_SERVER_ID}'
+ExecStart=/bin/bash -lc 'java -jar /opt/chatflow/server-v2-all.jar 8080 0 $${CHATFLOW_SERVER_ID}'
 Restart=always
 RestartSec=2
 StandardOutput=append:/var/log/chatflow/server-v2.log

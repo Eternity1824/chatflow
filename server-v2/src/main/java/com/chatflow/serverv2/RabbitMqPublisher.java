@@ -10,6 +10,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public class RabbitMqPublisher implements AutoCloseable {
@@ -39,6 +41,7 @@ public class RabbitMqPublisher implements AutoCloseable {
         }
 
         Channel channel = null;
+        long sequenceNumber = -1L;
         try {
             channel = channelPool.borrowChannel();
             byte[] payload = OBJECT_MAPPER.writeValueAsString(message).getBytes(StandardCharsets.UTF_8);
@@ -48,12 +51,19 @@ public class RabbitMqPublisher implements AutoCloseable {
                     .timestamp(new java.util.Date())
                     .type(message.getMessageType().name())
                     .build();
+            sequenceNumber = channel.getNextPublishSeqNo();
+            CompletableFuture<Void> confirmFuture = channelPool.registerPublishConfirm(channel, sequenceNumber);
             channel.basicPublish(config.getExchangeName(), routingKey, true, properties, payload);
-            channel.waitForConfirmsOrDie(5_000);
-            if (config.isCircuitBreakerEnabled()) {
-                circuitBreaker.recordSuccess();
+
+            if (config.isPublisherConfirmAwait()) {
+                awaitConfirm(confirmFuture, message.getMessageId());
+            } else {
+                observeConfirmAsync(confirmFuture, message.getMessageId());
             }
         } catch (Exception e) {
+            if (channel != null && sequenceNumber > 0) {
+                channelPool.failPublishConfirm(channel, sequenceNumber, e);
+            }
             if (config.isCircuitBreakerEnabled()) {
                 circuitBreaker.recordFailure();
             }
@@ -68,5 +78,35 @@ public class RabbitMqPublisher implements AutoCloseable {
     @Override
     public void close() throws Exception {
         channelPool.close();
+    }
+
+    private void awaitConfirm(CompletableFuture<Void> confirmFuture, String messageId) throws Exception {
+        try {
+            confirmFuture.get(config.getPublisherConfirmTimeoutMs(), TimeUnit.MILLISECONDS);
+            if (config.isCircuitBreakerEnabled()) {
+                circuitBreaker.recordSuccess();
+            }
+        } catch (Exception e) {
+            if (config.isCircuitBreakerEnabled()) {
+                circuitBreaker.recordFailure();
+            }
+            throw new IOException("Publisher confirm failed for message " + messageId, e);
+        }
+    }
+
+    private void observeConfirmAsync(CompletableFuture<Void> confirmFuture, String messageId) {
+        confirmFuture.orTimeout(config.getPublisherConfirmTimeoutMs(), TimeUnit.MILLISECONDS)
+                .whenComplete((unused, error) -> {
+                    if (config.isCircuitBreakerEnabled()) {
+                        if (error == null) {
+                            circuitBreaker.recordSuccess();
+                        } else {
+                            circuitBreaker.recordFailure();
+                        }
+                    }
+                    if (error != null) {
+                        logger.warn("Async publisher confirm failed for message {}", messageId, error);
+                    }
+                });
     }
 }
