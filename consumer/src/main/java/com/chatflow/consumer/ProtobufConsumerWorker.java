@@ -245,8 +245,11 @@ public class ProtobufConsumerWorker implements AutoCloseable {
     private void processAckAction(long deliveryTag, com.chatflow.protocol.proto.QueueChatMessage message, int retryCount, boolean delivered) {
         if (delivered) {
             basicAck(deliveryTag);
+            metrics.recordBroadcast(message.getRoomId());
             return;
         }
+
+        metrics.recordBroadcastFailure();
 
         if (retryCount < config.getMaxRetries()) {
             int nextRetry = retryCount + 1;

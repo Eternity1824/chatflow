@@ -58,6 +58,7 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
                         messageType,
                         roomId,
                         ackTimeMs,
+                        latencyMs,
                         response.getMessageId(),
                         response.getRoomSequence());
                 return;
@@ -76,6 +77,7 @@ public class WebSocketClientHandler extends SimpleChannelInboundHandler<WebSocke
                     response.getRoomSequence());
         } catch (Exception e) {
             logger.warn("Failed to parse server response", e);
+            metrics.recordParseError();
             metrics.recordFailure();
         }
     }

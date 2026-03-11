@@ -10,7 +10,7 @@ admin_cidrs = []
 key_name = ""
 
 # Assignment load-balanced scenarios: set to 1, 2, then 4 for tests.
-server_count = 4
+server_count   = 4
 consumer_count = 4
 
 server_instance_type   = "t3.small"
@@ -24,11 +24,20 @@ server_grpc_port = 9090
 # - "grpc" => "server-private-ip:9090"
 # - "http" => "http://server-private-ip:8080"
 consumer_broadcast_mode = "grpc"
+consumer_threads        = 80
+consumer_prefetch       = 200
+consumer_room_max_inflight   = 16
+consumer_global_max_inflight = 2000
 
 chatflow_internal_token = "replace-with-strong-token"
 rabbit_username         = "guest"
 rabbit_password         = "guest"
 
-# Optional: if set, instances auto-install and run these jars with systemd.
+# Recommended deployment mode: container images.
+rabbit_image   = "rabbitmq:3-management"
+server_image   = "ghcr.io/<user>/chatflow-server-v2:<tag>"
+consumer_image = "ghcr.io/<user>/chatflow-consumer:<tag>"
+
+# Optional jar fallback mode (used only if image is empty).
 # server_jar_url   = "https://<bucket-or-host>/server-v2-all.jar"
 # consumer_jar_url = "https://<bucket-or-host>/consumer-all.jar"

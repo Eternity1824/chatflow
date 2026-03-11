@@ -13,14 +13,19 @@ import java.util.concurrent.atomic.LongAdder;
 public class DetailedMetricsCollector {
     private final CountDownLatch responseLatch;
     private final long[] latenciesMs;
+    private final long[] broadcastLatenciesMs;
     private final long[] ackTimesMs;
     private final AtomicInteger latencyIndex = new AtomicInteger(0);
+    private final AtomicInteger broadcastLatencyIndex = new AtomicInteger(0);
     private final AtomicInteger ackIndex = new AtomicInteger(0);
     private final LongAdder successCount = new LongAdder();
     private final LongAdder errorResponseCount = new LongAdder();
     private final LongAdder broadcastDeliveryCount = new LongAdder();
     private final LongAdder outOfOrderBroadcastCount = new LongAdder();
     private final LongAdder failureCount = new LongAdder();
+    private final LongAdder retryCount = new LongAdder();
+    private final LongAdder connectionFailureCount = new LongAdder();
+    private final LongAdder parseErrorCount = new LongAdder();
     private final LongAdder totalConnections = new LongAdder();
     private final LongAdder reconnections = new LongAdder();
     private final ConcurrentHashMap<String, LongAdder> roomCounts = new ConcurrentHashMap<>();
@@ -34,6 +39,7 @@ public class DetailedMetricsCollector {
     public DetailedMetricsCollector(int totalMessages, CountDownLatch responseLatch, String csvPath) throws Exception {
         this.responseLatch = responseLatch;
         this.latenciesMs = new long[totalMessages];
+        this.broadcastLatenciesMs = new long[totalMessages];
         this.ackTimesMs = new long[totalMessages];
         this.perMessageWriter = new CsvWriter(csvPath,
                 "timestamp,messageType,latencyMs,statusCode,roomId,responseType,messageId,roomSequence");
@@ -50,6 +56,18 @@ public class DetailedMetricsCollector {
     public void recordFailure() {
         failureCount.increment();
         responseLatch.countDown();
+    }
+
+    public void recordConnectionFailure() {
+        connectionFailureCount.increment();
+    }
+
+    public void recordRetryAttempt() {
+        retryCount.increment();
+    }
+
+    public void recordParseError() {
+        parseErrorCount.increment();
     }
 
     public void markStart() {
@@ -110,9 +128,16 @@ public class DetailedMetricsCollector {
             ChatMessage.MessageType messageType,
             String roomId,
             long ackTimeMs,
+            long endToEndLatencyMs,
             String messageId,
             Long roomSequence) {
         broadcastDeliveryCount.increment();
+        if (endToEndLatencyMs >= 0) {
+            int idx = broadcastLatencyIndex.getAndIncrement();
+            if (idx < broadcastLatenciesMs.length) {
+                broadcastLatenciesMs[idx] = endToEndLatencyMs;
+            }
+        }
         String typeKey = messageType != null ? messageType.name() : "UNKNOWN";
         String roomKey = roomId == null ? "unknown" : roomId;
         if (roomSequence != null) {
@@ -154,6 +179,9 @@ public class DetailedMetricsCollector {
         System.out.println("Error responses: " + errorResponseCount.sum());
         System.out.println("Broadcast deliveries: " + broadcastDeliveryCount.sum());
         System.out.println("Out-of-order broadcasts: " + outOfOrderBroadcastCount.sum());
+        System.out.println("Connection failures: " + connectionFailureCount.sum());
+        System.out.println("Retry attempts: " + retryCount.sum());
+        System.out.println("Parse errors: " + parseErrorCount.sum());
         System.out.println("Failed messages: " + failureCount.sum());
         System.out.println("Total runtime: " + getTotalRuntimeMs() + " ms");
         System.out.println("Throughput: " + String.format("%.2f", getThroughput()) + " messages/second");
@@ -161,6 +189,7 @@ public class DetailedMetricsCollector {
         System.out.println("Reconnections: " + reconnections.sum());
 
         printLatencyStats();
+        printBroadcastLatencyStats();
         printRoomThroughput();
         printMessageTypeDistribution();
     }
@@ -187,6 +216,30 @@ public class DetailedMetricsCollector {
         System.out.println("Latency (ms) p95: " + p95);
         System.out.println("Latency (ms) p99: " + p99);
         System.out.println("Latency (ms) min/max: " + min + "/" + max);
+    }
+
+    private void printBroadcastLatencyStats() {
+        int count = Math.min(broadcastLatencyIndex.get(), broadcastLatenciesMs.length);
+        if (count == 0) {
+            System.out.println("Broadcast E2E latency (ms): no data");
+            return;
+        }
+
+        long[] copy = Arrays.copyOf(broadcastLatenciesMs, count);
+        Arrays.sort(copy);
+
+        long min = copy[0];
+        long max = copy[count - 1];
+        double mean = Arrays.stream(copy).average().orElse(0);
+        long median = percentile(copy, 0.50);
+        long p95 = percentile(copy, 0.95);
+        long p99 = percentile(copy, 0.99);
+
+        System.out.println("Broadcast E2E Latency (ms) mean: " + String.format("%.2f", mean));
+        System.out.println("Broadcast E2E Latency (ms) median: " + median);
+        System.out.println("Broadcast E2E Latency (ms) p95: " + p95);
+        System.out.println("Broadcast E2E Latency (ms) p99: " + p99);
+        System.out.println("Broadcast E2E Latency (ms) min/max: " + min + "/" + max);
     }
 
     private long percentile(long[] sorted, double p) {
@@ -260,6 +313,9 @@ public class DetailedMetricsCollector {
         writer.writeLine("error_responses," + errorResponseCount.sum());
         writer.writeLine("broadcast_deliveries," + broadcastDeliveryCount.sum());
         writer.writeLine("out_of_order_broadcasts," + outOfOrderBroadcastCount.sum());
+        writer.writeLine("connection_failures," + connectionFailureCount.sum());
+        writer.writeLine("retry_attempts," + retryCount.sum());
+        writer.writeLine("parse_errors," + parseErrorCount.sum());
         writer.writeLine("failed_messages," + failureCount.sum());
         writer.writeLine("total_runtime_ms," + getTotalRuntimeMs());
         writer.writeLine("throughput_msg_per_sec," + String.format("%.2f", getThroughput()));

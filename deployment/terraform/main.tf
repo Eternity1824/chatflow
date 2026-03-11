@@ -251,9 +251,11 @@ resource "aws_instance" "rabbit" {
   vpc_security_group_ids      = [aws_security_group.rabbit.id]
   associate_public_ip_address = var.associate_public_ip
   key_name                    = local.key_name_or_null
+  user_data_replace_on_change = true
   user_data = templatefile("${path.module}/user_data/rabbitmq.sh.tftpl", {
     rabbit_username = var.rabbit_username
     rabbit_password = var.rabbit_password
+    rabbit_image    = var.rabbit_image
   })
 
   root_block_device {
@@ -272,6 +274,7 @@ resource "aws_instance" "server" {
   vpc_security_group_ids      = [aws_security_group.server.id]
   associate_public_ip_address = var.associate_public_ip
   key_name                    = local.key_name_or_null
+  user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/server.sh.tftpl", {
     server_id            = "server-${count.index + 1}"
@@ -289,6 +292,7 @@ resource "aws_instance" "server" {
     queue_message_ttl_ms = var.queue_message_ttl_ms
     queue_max_length     = var.queue_max_length
     server_jar_url       = var.server_jar_url
+    server_image         = var.server_image
   })
 
   root_block_device {
@@ -314,6 +318,7 @@ resource "aws_instance" "consumer" {
   vpc_security_group_ids      = [aws_security_group.consumer.id]
   associate_public_ip_address = var.associate_public_ip
   key_name                    = local.key_name_or_null
+  user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/consumer.sh.tftpl", {
     rabbit_host                    = aws_instance.rabbit.private_ip
@@ -328,6 +333,8 @@ resource "aws_instance" "consumer" {
     queue_max_length               = var.queue_max_length
     consumer_threads               = var.consumer_threads
     consumer_prefetch              = var.consumer_prefetch
+    consumer_room_max_inflight     = var.consumer_room_max_inflight
+    consumer_global_max_inflight   = var.consumer_global_max_inflight
     consumer_max_retries           = var.consumer_max_retries
     consumer_retry_backoff_base_ms = var.consumer_retry_backoff_base_ms
     consumer_retry_backoff_max_ms  = var.consumer_retry_backoff_max_ms
@@ -339,6 +346,7 @@ resource "aws_instance" "consumer" {
     consumer_instance_index        = count.index
     consumer_instance_count        = var.consumer_count
     consumer_jar_url               = var.consumer_jar_url
+    consumer_image                 = var.consumer_image
   })
 
   root_block_device {

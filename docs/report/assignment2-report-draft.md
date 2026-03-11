@@ -202,12 +202,114 @@ For assignment runs, we plan:
 - 2 server scenario -> 2 consumer shards
 - 4 server scenario -> 4 consumer shards
 
-## 3. Next Sections To Fill Later
+## 3. Test Results Template (Fill During Runs)
 
-The following sections are intentionally left for your experiment outputs:
+### 3.1 Metrics Requirements Checklist (Assignment Alignment)
 
-- Test Results (single instance, 2-instance ALB, 4-instance ALB)
-- Throughput/latency tables and analysis
-- RabbitMQ console screenshots (queue depth and publish/consume rates)
-- ALB distribution screenshots/metrics
-- Final tuning decisions (thread counts, prefetch, retry settings)
+For each run, ensure the following metrics are captured:
+
+- Client metrics:
+  - Total runtime
+  - Throughput (messages/second)
+  - Connection failures
+  - Retry attempts
+- Queue metrics:
+  - Peak queue depth
+  - Average queue depth
+  - Consumer rate
+  - Producer rate
+- System metrics:
+  - CPU usage (all instances)
+  - Memory usage
+  - Network I/O
+  - Disk I/O
+
+Additional (recommended) metrics used in this report:
+
+- ACK latency (`mean/median/p95/p99`)
+- Broadcast E2E latency (`mean/median/p95/p99`)
+- Error responses and parse errors
+
+### 3.2 Test Matrix and Summary Table
+
+| Scenario | Server Count | Consumer Count | Message Count | Client Threads | Throughput (msg/s) | ACK p95 (ms) | ACK p99 (ms) | E2E p95 (ms) | E2E p99 (ms) | Conn Failures | Retry Attempts | Peak Queue Ready | Avg Queue Ready | Notes |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Single-server baseline | 1 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+| Load-balanced (2 servers) | 2 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+| Load-balanced (4 servers) | 4 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+| Stress (4 servers) | 4 | 4 | 1,000,000 | 64/128 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+
+### 3.3 Screenshot Checklist
+
+#### A. Single Instance Scenario
+
+- [ ] Client terminal output screenshot (performance summary)
+- [ ] RabbitMQ Overview screenshot (queue depth + message rates)
+- [ ] RabbitMQ Queues screenshot (all room queues with ready/unacked/rates)
+- [ ] EC2 system metrics screenshot(s): CPU/Network/Disk
+- [ ] Memory evidence screenshot (`free -m` or `top`)
+
+#### B. 2-Instance Load Balanced Scenario
+
+- [ ] Client terminal output screenshot
+- [ ] ALB CloudWatch screenshot (RequestCount, TargetResponseTime, HealthyHostCount)
+- [ ] RabbitMQ Overview screenshot
+- [ ] RabbitMQ Queues screenshot
+- [ ] EC2 system metrics screenshot(s)
+
+#### C. 4-Instance Load Balanced Scenario
+
+- [ ] Client terminal output screenshot
+- [ ] ALB CloudWatch screenshot (distribution and latency)
+- [ ] RabbitMQ Overview screenshot
+- [ ] RabbitMQ Queues screenshot
+- [ ] EC2 system metrics screenshot(s)
+- [ ] Optional stress run screenshot (1M messages)
+
+### 3.4 Configuration Snapshot Per Run
+
+Fill one block per test run:
+
+- Run ID: `<TBD>`
+- Date/Time (PST): `<TBD>`
+- Git commit: `<TBD>`
+- Server image tag: `<TBD>`
+- Consumer image tag: `<TBD>`
+- `server_count`: `<TBD>`
+- `consumer_count`: `<TBD>`
+- `consumer_threads`: `<TBD>`
+- `consumer_prefetch`: `<TBD>`
+- `room_max_inflight`: `<TBD>`
+- `global_max_inflight`: `<TBD>`
+- Client config file: `<TBD>`
+
+### 3.5 Queue Profile Assessment
+
+For each run, classify queue profile and explain:
+
+- Profile type: `Stable plateau` / `Sawtooth` / `Unstable`
+- Peak ready depth: `<TBD>`
+- Drain behavior: `<TBD>`
+- Redelivery/duplicate behavior: `<TBD>`
+- Bottleneck hypothesis: `<TBD>`
+
+### 3.6 System Utilization Snapshot (Minimal Overhead Approach)
+
+Prometheus is not required for this assignment.  
+Use the following low-overhead evidence:
+
+- CloudWatch:
+  - ALB: RequestCount, TargetResponseTime, HealthyHostCount
+  - EC2: CPUUtilization, NetworkIn/Out, DiskReadBytes/DiskWriteBytes
+- On-instance commands (during run):
+  - `free -m`
+  - `top -b -n 1` (or macOS equivalent when local)
+  - optional: `iostat -x 1 5`, `sar -n DEV 1 5`
+
+### 3.7 Improvement Analysis (Fill After All Runs)
+
+- Throughput improvement from 1 -> 2 -> 4 servers: `<TBD>`
+- Latency trend as scale increases: `<TBD>`
+- Queue depth trend as scale increases: `<TBD>`
+- Resource bottleneck shifts (server vs consumer vs rabbit): `<TBD>`
+- Final tuned configuration and rationale: `<TBD>`

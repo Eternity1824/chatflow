@@ -40,6 +40,7 @@ public class SenderThread implements Runnable {
     private final long flushIntervalNs;
     private final boolean syncOnFlush;
     private final RateLimiter rateLimiter;
+    private final long flushJitterRangeNs;
 
     public SenderThread(BlockingQueue<MessageTemplate> messageQueue,
                        int messagesToSend, ConnectionPool connectionPool,
@@ -56,6 +57,7 @@ public class SenderThread implements Runnable {
         this.flushIntervalNs = Math.max(0, flushIntervalMs) * 1_000_000L;
         this.syncOnFlush = syncOnFlush;
         this.rateLimiter = rateLimiter;
+        this.flushJitterRangeNs = Math.max(0L, this.flushIntervalNs);
     }
 
     @Override
@@ -80,7 +82,13 @@ public class SenderThread implements Runnable {
                         try {
                             BatchState state = batches.computeIfAbsent(roomId, k -> {
                                 BatchState s = new BatchState();
-                                s.lastFlushNs = System.nanoTime();
+                                long nowNs = System.nanoTime();
+                                if (flushJitterRangeNs > 1) {
+                                    long jitterNs = Math.abs(random.nextLong()) % flushJitterRangeNs;
+                                    s.lastFlushNs = nowNs - jitterNs;
+                                } else {
+                                    s.lastFlushNs = nowNs;
+                                }
                                 return s;
                             });
 
@@ -118,6 +126,7 @@ public class SenderThread implements Runnable {
                         }
 
                     } catch (Exception e) {
+                        metrics.recordConnectionFailure();
                         MDC.put("roomId", roomId);
                         try {
                             logger.warn("Send failed (attempt {})", (retry + 1), e);
@@ -126,6 +135,7 @@ public class SenderThread implements Runnable {
                         }
                         connectionPool.removeConnection(roomId);
                         if (retry < MAX_RETRIES - 1) {
+                            metrics.recordRetryAttempt();
                             int baseBackoffMs = INITIAL_BACKOFF_MS * (1 << retry);
                             int jitteredBackoffMs = (int) (baseBackoffMs * (1.0 + random.nextDouble()));
                             Thread.sleep(jitteredBackoffMs);

@@ -194,6 +194,18 @@ variable "consumer_prefetch" {
   default     = 100
 }
 
+variable "consumer_room_max_inflight" {
+  description = "Max in-flight broadcasts per room on each consumer instance."
+  type        = number
+  default     = 8
+}
+
+variable "consumer_global_max_inflight" {
+  description = "Global max in-flight broadcasts on each consumer instance."
+  type        = number
+  default     = 500
+}
+
 variable "consumer_max_retries" {
   description = "Max retry count for failed broadcasts."
   type        = number
@@ -242,6 +254,24 @@ variable "server_jar_url" {
 
 variable "consumer_jar_url" {
   description = "Optional URL to consumer fat jar. If empty, startup service is not installed."
+  type        = string
+  default     = ""
+}
+
+variable "rabbit_image" {
+  description = "RabbitMQ container image."
+  type        = string
+  default     = "rabbitmq:3-management"
+}
+
+variable "server_image" {
+  description = "Container image for server-v2. If non-empty, user_data runs Docker container."
+  type        = string
+  default     = ""
+}
+
+variable "consumer_image" {
+  description = "Container image for consumer. If non-empty, user_data runs Docker container."
   type        = string
   default     = ""
 }
