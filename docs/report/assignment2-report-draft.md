@@ -124,6 +124,21 @@ This topology isolates room traffic, keeps ordering naturally scoped per queue, 
 
 Note: scaling is configuration-driven (threads + instance count + room shard assignment), not full autoscaling yet.
 
+### 2.4.2 Client Thread Model Decision (Why no 128+ in final runs)
+
+For this implementation, client send path is Netty event-loop + non-blocking write/flush with a global rate limiter.
+Under this model, increasing application sender threads beyond a moderate value did not improve throughput and increased instability.
+
+Observed on March 11, 2026 (single server + single consumer, targetQps=4500):
+
+- 32 threads: ~4366 msg/s, lower error ratio, better E2E p99
+- 64 threads: ~4311 msg/s, higher error ratio than 32
+- 128 threads: ~4224 msg/s, highest error ratio and worse tail latency
+
+Conclusion:
+- keep 64-and-below profiles for final tuning and reporting
+- exclude 128/256/512 from final optimization set because extra sender threads add context-switch overhead without throughput gain in this Netty-based path
+
 ### 2.4.1 Inflight Strategy (Why `inflight=8`, and why keep `inflight=1`)
 
 We use two operation modes intentionally:
@@ -237,7 +252,7 @@ Additional (recommended) metrics used in this report:
 | Single-server baseline | 1 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
 | Load-balanced (2 servers) | 2 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
 | Load-balanced (4 servers) | 4 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
-| Stress (4 servers) | 4 | 4 | 1,000,000 | 64/128 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+| Stress (4 servers) | 4 | 4 | 1,000,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
 
 ### 3.3 Screenshot Checklist
 

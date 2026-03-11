@@ -51,13 +51,15 @@ public class GrpcBroadcastClient implements AutoCloseable {
                 .setMessage(protoMessage)
                 .build();
 
-        List<CompletableFuture<Boolean>> futures = new ArrayList<>(channels.size());
-        for (TargetChannel targetChannel : channels) {
-            futures.add(sendToTarget(targetChannel, request, protoMessage.getMessageId()));
+        int channelCount = channels.size();
+        @SuppressWarnings("unchecked")
+        CompletableFuture<Boolean>[] futures = new CompletableFuture[channelCount];
+        
+        for (int i = 0; i < channelCount; i++) {
+            futures[i] = sendToTarget(channels.get(i), request, protoMessage.getMessageId());
         }
 
-        CompletableFuture<?>[] array = futures.toArray(new CompletableFuture[0]);
-        return CompletableFuture.allOf(array)
+        return CompletableFuture.allOf(futures)
                 .handle((unused, error) -> {
                     boolean allSucceeded = error == null;
                     for (CompletableFuture<Boolean> future : futures) {

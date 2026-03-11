@@ -161,10 +161,12 @@ public class ProtobufConsumerWorker implements AutoCloseable {
             return;
         }
 
-        com.chatflow.protocol.proto.QueueChatMessage finalMessage = protoMessage;
+        com.chatflow.protocol.proto.QueueChatMessage finalMessage;
         if (protoMessage.getRoomSequence() == 0 && !protoMessage.getRoomId().isEmpty()) {
             long sequence = roomSequenceManager.nextSequence(protoMessage.getRoomId());
             finalMessage = protoMessage.toBuilder().setRoomSequence(sequence).build();
+        } else {
+            finalMessage = protoMessage;
         }
 
         int retryCount = extractRetryCount(properties.getHeaders());
@@ -294,22 +296,23 @@ public class ProtobufConsumerWorker implements AutoCloseable {
                 return;
             }
 
-            Map<String, Object> headers = new HashMap<>();
+            Map<String, Object> headers = new HashMap<>(1);
             headers.put(RETRY_HEADER, retryCount);
 
             byte[] payload = message.toByteArray();
             AMQP.BasicProperties properties = new AMQP.BasicProperties.Builder()
                     .messageId(message.getMessageId())
-                    .timestamp(new java.util.Date())
+                    .timestamp(new java.util.Date(System.currentTimeMillis()))
                     .type(message.getMessageType().name())
                     .contentType("application/x-protobuf")
                     .deliveryMode(2)
                     .headers(headers)
                     .build();
 
+            String routingKey = "room." + message.getRoomId();
             channel.basicPublish(
                     config.getExchangeName(),
-                    "room." + message.getRoomId(),
+                    routingKey,
                     true,
                     properties,
                     payload);

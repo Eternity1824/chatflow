@@ -2,6 +2,7 @@ package com.chatflow.consumer;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MessageDeduplicator {
     private static class Entry {
@@ -18,10 +19,14 @@ public class MessageDeduplicator {
     private final ConcurrentLinkedQueue<Entry> timeline = new ConcurrentLinkedQueue<>();
     private final int maxEntries;
     private final long ttlMs;
+    private final int cleanupInterval;
+    private final AtomicInteger messageCounter = new AtomicInteger(0);
+    private volatile long lastCleanupTime = System.currentTimeMillis();
 
     public MessageDeduplicator(int maxEntries, long ttlMs) {
         this.maxEntries = Math.max(1_000, maxEntries);
         this.ttlMs = Math.max(1_000L, ttlMs);
+        this.cleanupInterval = Math.max(100, maxEntries / 20);
     }
 
     public boolean isDuplicate(String messageId) {
@@ -29,14 +34,21 @@ public class MessageDeduplicator {
             return false;
         }
         long now = System.currentTimeMillis();
-        cleanup(now);
+        
         Long existing = seenMessages.putIfAbsent(messageId, now);
         if (existing != null && now - existing <= ttlMs) {
             return true;
         }
         seenMessages.put(messageId, now);
         timeline.offer(new Entry(messageId, now));
-        cleanup(now);
+        
+        if (messageCounter.incrementAndGet() >= cleanupInterval || 
+            now - lastCleanupTime > ttlMs / 2) {
+            cleanup(now);
+            messageCounter.set(0);
+            lastCleanupTime = now;
+        }
+        
         return false;
     }
 
