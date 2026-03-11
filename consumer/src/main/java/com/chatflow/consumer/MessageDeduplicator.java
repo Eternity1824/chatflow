@@ -1,15 +1,19 @@
 package com.chatflow.consumer;
 
+import java.util.ArrayDeque;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class MessageDeduplicator {
     private static class Entry {
-        private final String messageId;
-        private final long timestamp;
+        private String messageId;
+        private long timestamp;
 
-        private Entry(String messageId, long timestamp) {
+        private Entry() {
+        }
+
+        private void reset(String messageId, long timestamp) {
             this.messageId = messageId;
             this.timestamp = timestamp;
         }
@@ -22,6 +26,9 @@ public class MessageDeduplicator {
     private final int cleanupInterval;
     private final AtomicInteger messageCounter = new AtomicInteger(0);
     private volatile long lastCleanupTime = System.currentTimeMillis();
+    
+    private final ArrayDeque<Entry> entryPool = new ArrayDeque<>();
+    private static final int MAX_POOL_SIZE = 1000;
 
     public MessageDeduplicator(int maxEntries, long ttlMs) {
         this.maxEntries = Math.max(1_000, maxEntries);
@@ -40,7 +47,10 @@ public class MessageDeduplicator {
             return true;
         }
         seenMessages.put(messageId, now);
-        timeline.offer(new Entry(messageId, now));
+        
+        Entry entry = acquireEntry();
+        entry.reset(messageId, now);
+        timeline.offer(entry);
         
         if (messageCounter.incrementAndGet() >= cleanupInterval || 
             now - lastCleanupTime > ttlMs / 2) {
@@ -50,6 +60,28 @@ public class MessageDeduplicator {
         }
         
         return false;
+    }
+    
+    private Entry acquireEntry() {
+        synchronized (entryPool) {
+            Entry entry = entryPool.pollFirst();
+            if (entry != null) {
+                return entry;
+            }
+        }
+        return new Entry();
+    }
+    
+    private void releaseEntry(Entry entry) {
+        if (entry == null) {
+            return;
+        }
+        synchronized (entryPool) {
+            if (entryPool.size() < MAX_POOL_SIZE) {
+                entry.reset(null, 0);
+                entryPool.offerLast(entry);
+            }
+        }
     }
 
     private void cleanup(long now) {
@@ -63,8 +95,11 @@ public class MessageDeduplicator {
             if (!expired && !oversized) {
                 break;
             }
-            timeline.poll();
-            seenMessages.remove(entry.messageId, entry.timestamp);
+            entry = timeline.poll();
+            if (entry != null) {
+                seenMessages.remove(entry.messageId, entry.timestamp);
+                releaseEntry(entry);
+            }
         }
     }
 }
