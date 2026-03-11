@@ -26,6 +26,7 @@ public class MessageDeduplicator {
     private final int cleanupInterval;
     private final AtomicInteger messageCounter = new AtomicInteger(0);
     private volatile long lastCleanupTime = System.currentTimeMillis();
+    private final Object cleanupLock = new Object();
     
     private final ArrayDeque<Entry> entryPool = new ArrayDeque<>();
     private static final int MAX_POOL_SIZE = 1000;
@@ -52,11 +53,17 @@ public class MessageDeduplicator {
         entry.reset(messageId, now);
         timeline.offer(entry);
         
-        if (messageCounter.incrementAndGet() >= cleanupInterval || 
+        if (messageCounter.incrementAndGet() >= cleanupInterval ||
             now - lastCleanupTime > ttlMs / 2) {
-            cleanup(now);
-            messageCounter.set(0);
-            lastCleanupTime = now;
+            synchronized (cleanupLock) {
+                // Re-check under lock to avoid duplicate concurrent cleanup passes.
+                if (messageCounter.get() >= cleanupInterval ||
+                    now - lastCleanupTime > ttlMs / 2) {
+                    cleanup(now);
+                    messageCounter.set(0);
+                    lastCleanupTime = now;
+                }
+            }
         }
         
         return false;
