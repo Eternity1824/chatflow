@@ -45,7 +45,7 @@ public class ChatServer {
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childOption(ChannelOption.AUTO_READ, true)
                     .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK,
-                            new WriteBufferWaterMark(32 * 1024, 64 * 1024))
+                            new WriteBufferWaterMark( 256 * 1024,  1024 * 1024))
                     .childHandler(new ChannelInitializer<SocketChannel>() {
                         @Override
                         public void initChannel(SocketChannel ch) throws Exception {
@@ -58,7 +58,7 @@ public class ChatServer {
                             pipeline.addLast("httpAggregator", new HttpObjectAggregator(65536));
 
                             // Big file upload
-                            pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());
+                            // pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());
 
                             // Extract roomId from /chat/{roomId} during handshake
                             pipeline.addLast("roomIdExtractor", new RoomIdExtractorHandler());

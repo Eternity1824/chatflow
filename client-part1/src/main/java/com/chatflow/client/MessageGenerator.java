@@ -1,9 +1,6 @@
 package com.chatflow.client;
 
 import com.chatflow.protocol.ChatMessage;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
-import java.time.Instant;
 import java.util.Random;
 import java.util.concurrent.BlockingQueue;
 
@@ -28,24 +25,24 @@ public class MessageGenerator implements Runnable {
             "Great job!", "Well done!", "Congratulations!"
     };
 
-    private final BlockingQueue<String> messageQueue;
+    private final BlockingQueue<MessageTemplate> messageQueue;
     private final int totalMessages;
-    private final ObjectMapper objectMapper;
     private final Random random;
+    private final boolean[] joinedRooms;
 
-    public MessageGenerator(BlockingQueue<String> messageQueue, int totalMessages) {
+    public MessageGenerator(BlockingQueue<MessageTemplate> messageQueue, int totalMessages, int roomCount) {
         this.messageQueue = messageQueue;
         this.totalMessages = totalMessages;
-        this.objectMapper = new ObjectMapper();
         this.random = new Random();
+        this.joinedRooms = new boolean[roomCount + 1];
     }
 
     @Override
     public void run() {
         try {
             for (int i = 0; i < totalMessages; i++) {
-                String jsonMessage = generateMessage();
-                messageQueue.put(jsonMessage);
+                MessageTemplate template = generateTemplate();
+                messageQueue.put(template);
             }
             System.out.println("Message generation completed: " + totalMessages + " messages");
         } catch (Exception e) {
@@ -54,31 +51,43 @@ public class MessageGenerator implements Runnable {
         }
     }
 
-    private String generateMessage() throws Exception {
+    private MessageTemplate generateTemplate() {
         int userId = random.nextInt(100000) + 1;
         String username = "user" + userId;
         String message = PREDEFINED_MESSAGES[random.nextInt(PREDEFINED_MESSAGES.length)];
         int roomId = random.nextInt(20) + 1;
-        String timestamp = Instant.now().toString();
-
-        ChatMessage.MessageType messageType;
-        int typeRoll = random.nextInt(100);
-        if (typeRoll < 90) {
-            messageType = ChatMessage.MessageType.TEXT;
-        } else if (typeRoll < 95) {
-            messageType = ChatMessage.MessageType.JOIN;
-        } else {
-            messageType = ChatMessage.MessageType.LEAVE;
-        }
-
-        ChatMessage chatMessage = new ChatMessage(
+        ChatMessage.MessageType messageType = pickMessageType(roomId);
+        return new MessageTemplate(
                 String.valueOf(userId),
                 username,
                 message,
-                timestamp,
-                messageType
+                messageType,
+                String.valueOf(roomId)
         );
+    }
 
-        return objectMapper.writeValueAsString(chatMessage) + "|" + roomId;
+    private ChatMessage.MessageType pickMessageType(int roomId) {
+        int typeRoll = random.nextInt(100);
+        ChatMessage.MessageType chosen;
+        if (typeRoll < 90) {
+            chosen = ChatMessage.MessageType.TEXT;
+        } else if (typeRoll < 95) {
+            chosen = ChatMessage.MessageType.JOIN;
+        } else {
+            chosen = ChatMessage.MessageType.LEAVE;
+        }
+
+        boolean joined = joinedRooms[roomId];
+        if (!joined) {
+            chosen = ChatMessage.MessageType.JOIN;
+        }
+
+        if (chosen == ChatMessage.MessageType.JOIN) {
+            joinedRooms[roomId] = true;
+        } else if (chosen == ChatMessage.MessageType.LEAVE) {
+            joinedRooms[roomId] = false;
+        }
+
+        return chosen;
     }
 }

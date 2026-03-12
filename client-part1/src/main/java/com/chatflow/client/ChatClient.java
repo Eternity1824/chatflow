@@ -1,14 +1,23 @@
 package com.chatflow.client;
 
 import com.chatflow.util.RateLimiter;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFactory;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.epoll.Epoll;
+import io.netty.channel.epoll.EpollEventLoopGroup;
+import io.netty.channel.epoll.EpollSocketChannel;
+import io.netty.channel.kqueue.KQueue;
+import io.netty.channel.kqueue.KQueueEventLoopGroup;
+import io.netty.channel.kqueue.KQueueSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,6 +27,7 @@ public class ChatClient {
     private final String serverUrl;
     private final MetricsCollector metrics;
     private final EventLoopGroup sharedEventLoopGroup;
+    private final ChannelFactory<? extends Channel> channelFactory;
     private final ConnectionPool connectionPool;
     private final CountDownLatch responseLatch;
     private final int totalMessages;
@@ -26,6 +36,11 @@ public class ChatClient {
     private final int warmupTotal;
     private final int mainPhaseMessages;
     private final int responseWaitSeconds;
+    private final int batchSize;
+    private final int batchMaxBytes;
+    private final int flushIntervalMs;
+    private final boolean flushSync;
+    private final int connectionsPerRoom;
     private final int mainThreadsOverride;
     private final int targetQps;
     private final RateLimiter rateLimiter;
@@ -39,26 +54,55 @@ public class ChatClient {
         this.warmupTotal = warmupThreads * warmupMessagesPerThread;
         this.mainPhaseMessages = totalMessages - warmupTotal;
         this.responseWaitSeconds = settings.getResponseWaitSeconds();
+        this.batchSize = settings.getBatchSize();
+        this.batchMaxBytes = settings.getBatchMaxBytes();
+        this.flushIntervalMs = settings.getFlushIntervalMs();
+        this.flushSync = settings.isFlushSync();
+        this.connectionsPerRoom = settings.getConnectionsPerRoom();
         this.mainThreadsOverride = settings.getMainThreads();
         this.targetQps = settings.getTargetQps();
         this.rateLimiter = targetQps > 0 ? RateLimiter.create(targetQps) : null;
-        this.sharedEventLoopGroup = new NioEventLoopGroup();
+
+        EventLoopGroup eventLoopGroup;
+        ChannelFactory<? extends Channel> socketChannelFactory;
+        if (Epoll.isAvailable()) {
+            eventLoopGroup = new EpollEventLoopGroup();
+            socketChannelFactory = EpollSocketChannel::new;
+            logger.info("Using EpollEventLoopGroup");
+        } else if (KQueue.isAvailable()) {
+            eventLoopGroup = new KQueueEventLoopGroup();
+            socketChannelFactory = KQueueSocketChannel::new;
+            logger.info("Using KQueueEventLoopGroup");
+        } else {
+            eventLoopGroup = new NioEventLoopGroup();
+            socketChannelFactory = NioSocketChannel::new;
+            logger.info("Using NioEventLoopGroup");
+        }
+
+        this.sharedEventLoopGroup = eventLoopGroup;
+        this.channelFactory = socketChannelFactory;
         this.responseLatch = new CountDownLatch(totalMessages);
-        this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics,
-                responseLatch, settings.getConnectionsPerRoom());
+        this.connectionPool = new ConnectionPool(serverUrl, sharedEventLoopGroup, metrics, responseLatch,
+                connectionsPerRoom, settings.getHandshakeTimeoutSeconds(),
+                settings.getMaxConcurrentHandshakes(), settings.getHandshakeRetryDelayMs(),
+                channelFactory);
     }
 
     public void run() throws InterruptedException {
         logger.info("Starting ChatFlow Client");
         logger.info("Server URL: {}", serverUrl);
         logger.info("Total messages to send: {}", totalMessages);
+        logger.info("Config: warmupThreads={}, warmupMessagesPerThread={}, connectionsPerRoom={}",
+                warmupThreads, warmupMessagesPerThread, connectionsPerRoom);
+        logger.info("Config: batchSize={}, batchMaxBytes={}, flushIntervalMs={}, flushSync={}",
+                batchSize, batchMaxBytes, flushIntervalMs, flushSync);
         String mainThreadsLabel = mainThreadsOverride > 0 ? String.valueOf(mainThreadsOverride) : "auto";
         String targetQpsLabel = targetQps > 0 ? String.valueOf(targetQps) : "unlimited";
         logger.info("Config: mainThreads={}, targetQps={}", mainThreadsLabel, targetQpsLabel);
 
-        BlockingQueue<String> messageQueue = new ArrayBlockingQueue<>(100_000);
+        BlockingQueue<MessageTemplate> messageQueue = new ArrayBlockingQueue<>(100_000);
 
-        Thread generatorThread = new Thread(new MessageGenerator(messageQueue, totalMessages));
+        Thread generatorThread = new Thread(new MessageGenerator(messageQueue, totalMessages, 20));
         generatorThread.start();
 
         metrics.markStart();
@@ -77,7 +121,7 @@ public class ChatClient {
         }
         int messagesPerThread = mainPhaseMessages / mainThreads;
         int remainder = mainPhaseMessages % mainThreads;
-        
+
         logger.info("Starting {} threads for remaining {} messages", mainThreads, mainPhaseMessages);
         long mainStart = System.currentTimeMillis();
         runPhase(messageQueue, mainThreads, messagesPerThread, remainder);
@@ -94,23 +138,24 @@ public class ChatClient {
 
         metrics.markEnd();
         metrics.printSummary();
-        
+
         connectionPool.closeAll();
         sharedEventLoopGroup.shutdownGracefully();
     }
 
-    private void runPhase(BlockingQueue<String> queue, int numThreads, int messagesPerThread) 
+    private void runPhase(BlockingQueue<MessageTemplate> queue, int numThreads, int messagesPerThread)
             throws InterruptedException {
         runPhase(queue, numThreads, messagesPerThread, 0);
     }
 
-    private void runPhase(BlockingQueue<String> queue, int numThreads, 
-                         int messagesPerThread, int extraMessages) throws InterruptedException {
+    private void runPhase(BlockingQueue<MessageTemplate> queue, int numThreads,
+                          int messagesPerThread, int extraMessages) throws InterruptedException {
         List<Thread> threads = new ArrayList<>();
 
         for (int i = 0; i < numThreads; i++) {
             int messagesToSend = messagesPerThread + (i < extraMessages ? 1 : 0);
-            Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool, rateLimiter));
+            Thread thread = new Thread(new SenderThread(queue, messagesToSend, connectionPool, metrics,
+                    responseLatch, batchSize, batchMaxBytes, flushIntervalMs, flushSync, rateLimiter));
             threads.add(thread);
             thread.start();
         }
@@ -125,7 +170,7 @@ public class ChatClient {
         return Math.max(32, availableProcessors * 4);
     }
 
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) throws Exception {
         String configPath = System.getenv("CHATFLOW_CONFIG");
         String serverUrlOverride = null;
         for (String arg : args) {

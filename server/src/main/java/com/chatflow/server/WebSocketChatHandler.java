@@ -1,13 +1,15 @@
 package com.chatflow.server;
 
 import com.chatflow.protocol.ChatMessage;
-import com.chatflow.protocol.ServerResponse;
 import com.chatflow.protocol.MessageValidator;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.ByteBufOutputStream;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
@@ -17,7 +19,6 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.io.InputStream;
-import java.time.Instant;
 import io.netty.util.AttributeKey;
 
 public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketFrame> {
@@ -26,6 +27,8 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
     private static final JsonFactory jsonFactory = objectMapper.getFactory();
     private static final Logger logger = LoggerFactory.getLogger(WebSocketChatHandler.class);
     private static final AttributeKey<Boolean> JOINED_ATTR = AttributeKey.valueOf("joined");
+    private static final int RESPONSE_BUF_MIN_CAPACITY = 256;
+    private static final int RESPONSE_BUF_MAX_CAPACITY = 2048;
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) throws Exception {
@@ -45,14 +48,9 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                 // 2. Validate message
                 MessageValidator.ValidationResult result = MessageValidator.validate(message);
 
-                String serverTimestamp = Instant.now().toString();
-
                 if (!result.isValid()) {
                     // 3. Send error response for invalid message
-                    ServerResponse errorResponse = ServerResponse.error(
-                            result.getErrorMessage(), serverTimestamp);
-                    String responseJson = objectMapper.writeValueAsString(errorResponse);
-                    ctx.write(new TextWebSocketFrame(responseJson));
+                    writeResponse(ctx, "error", null, result.getErrorMessage());
                     return;
                 }
 
@@ -63,27 +61,19 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
                 } else if (message.getMessageType() == ChatMessage.MessageType.LEAVE) {
                     ctx.channel().attr(JOINED_ATTR).set(false);
                 } else if (message.getMessageType() == ChatMessage.MessageType.TEXT && !joined) {
-                    ServerResponse errorResponse = ServerResponse.error(
-                            "User must JOIN before sending TEXT", serverTimestamp);
-                    String responseJson = objectMapper.writeValueAsString(errorResponse);
-                    ctx.write(new TextWebSocketFrame(responseJson));
+                    writeResponse(ctx, "error", null, "User must JOIN before sending TEXT");
                     return;
                 }
 
                 // 4. Valid message - echo back with server timestamp
-                ServerResponse successResponse = ServerResponse.success(message, serverTimestamp);
-                String responseJson = objectMapper.writeValueAsString(successResponse);
-                ctx.write(new TextWebSocketFrame(responseJson));
+                writeResponse(ctx, "success", message, null);
 
                 // logger.info("Validated and echoed (roomId={}): {}", roomId, message);
 
             } catch (Exception e) {
                 // 5. Invalid JSON format
-                String serverTimestamp = Instant.now().toString();
-                ServerResponse errorResponse = ServerResponse.error(
-                        "Invalid JSON format: " + e.getMessage(), serverTimestamp);
-                String responseJson = objectMapper.writeValueAsString(errorResponse);
-                ctx.write(new TextWebSocketFrame(responseJson));
+                writeResponse(ctx, "error", null,
+                        "Invalid JSON format: " + e.getMessage());
                 logger.warn("Invalid JSON format", e);
             }
         } finally {
@@ -174,5 +164,64 @@ public class WebSocketChatHandler extends SimpleChannelInboundHandler<WebSocketF
             MDC.remove("channelId");
         }
         ctx.close();
+    }
+
+    private void writeResponse(ChannelHandlerContext ctx, String status,
+                               ChatMessage message, String errorMessage) throws Exception {
+        ByteBuf buf = ctx.alloc().buffer(estimateResponseCapacity(message, errorMessage));
+        boolean written = false;
+        try (ByteBufOutputStream out = new ByteBufOutputStream(buf);
+             JsonGenerator gen = jsonFactory.createGenerator((java.io.OutputStream) out)) {
+            gen.setCodec(objectMapper);
+            gen.writeStartObject();
+            gen.writeStringField("status", status);
+            gen.writeFieldName("serverTimestamp");
+            FastTimestampFormatter.writeIsoTimestamp(gen);
+
+            if (message != null) {
+                gen.writeFieldName("originalMessage");
+                gen.writeObject(message);
+            }
+            if (errorMessage != null) {
+                gen.writeStringField("error", errorMessage);
+            }
+            gen.writeEndObject();
+            gen.flush();
+            written = true;
+        } finally {
+            if (!written) {
+                buf.release();
+            }
+        }
+
+        try {
+            ctx.write(new TextWebSocketFrame(buf));
+        } catch (Exception e) {
+            buf.release();
+            throw e;
+        }
+    }
+
+    private int estimateResponseCapacity(ChatMessage message, String errorMessage) {
+        int estimate = 128;
+        if (message != null) {
+            estimate += safeLength(message.getUserId());
+            estimate += safeLength(message.getUsername());
+            estimate += safeLength(message.getMessage());
+            estimate += safeLength(message.getTimestamp());
+        }
+        estimate += safeLength(errorMessage);
+
+        if (estimate < RESPONSE_BUF_MIN_CAPACITY) {
+            return RESPONSE_BUF_MIN_CAPACITY;
+        }
+        if (estimate > RESPONSE_BUF_MAX_CAPACITY) {
+            return RESPONSE_BUF_MAX_CAPACITY;
+        }
+        return estimate;
+    }
+
+    private int safeLength(String value) {
+        return value == null ? 0 : value.length();
     }
 }

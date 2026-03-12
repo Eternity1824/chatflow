@@ -3,6 +3,7 @@ package com.chatflow.client;
 import io.netty.channel.Channel;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,7 +39,7 @@ public class ConnectionPoolTest {
         CountDownLatch allowConnectReturn = new CountDownLatch(1);
 
         ConnectionPool pool = new ConnectionPool("ws://localhost:8080/chat", group, metrics,
-                new CountDownLatch(0), 1) {
+                new CountDownLatch(0), 1, 10, 4, 5, NioSocketChannel::new) {
             @Override
             Channel connect(String roomId) throws Exception {
                 connectCalls.incrementAndGet();
