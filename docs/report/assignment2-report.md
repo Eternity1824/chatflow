@@ -1,13 +1,13 @@
-# CS6650 Assignment 2 Report (Draft)
+# CS6650 Assignment 2 Report
 
 - Course: CS6650 Building Scalable Distributed Systems
 - Assignment: Assignment 2 - Adding Message Distribution and Queue Management
-- Date: 2026-03-08
-- Repository URL: `<REPLACE_WITH_YOUR_GIT_REPO_URL>`
+- Date: 2026-03-12
+- Repository URL: `<https://github.com/Eternity1824/chatflow.git>`
 
 ## 1. Git Repository URL
 
-`<REPLACE_WITH_YOUR_GIT_REPO_URL>`
+`<https://github.com/Eternity1824/chatflow.git>`
 
 The repository includes the required folders:
 - `/server-v2`
@@ -25,7 +25,7 @@ The deployed system separates concerns into ingress, queueing, and fan-out layer
 2. ALB forwards/sticks each connection to one `server-v2` instance.
 3. `server-v2` validates incoming chat messages and publishes them to RabbitMQ.
 4. RabbitMQ routes messages by room (`room.{roomId}`).
-5. `consumer` workers read room queues (push mode), process protobuf payloads, and call each server's internal gRPC broadcast service.
+5. `consumer` instances (room-sharded) read assigned room queues in push mode, process protobuf payloads, and call each server's internal gRPC broadcast service.
 6. Each `server-v2` instance broadcasts to its local in-memory room sessions.
 
 ```text
@@ -49,17 +49,23 @@ server-v2 #1           server-v2 #2          server-v2 #N
       +----------------+----------------+
       v                                 v
   queue room.1 ...                    queue room.20
-      \                                 /
-       \_______________________________/
+      |                                 |
+      +------------ room-sharded -------+
+                    assignment
                       |
                       v
-              Consumer worker pool
+      +---------------------------------------------+
+      | Consumer Instance #1 (worker pool)          |
+      | Consumer Instance #2 (worker pool)          |
+      | ...                                         |
+      | Consumer Instance #M (worker pool)          |
+      +---------------------------------------------+
                       |
                       v
-      gRPC InternalBroadcast.Broadcast (all servers)
+      gRPC InternalBroadcast.Broadcast (fanout to all servers)
                       |
                       v
-        Local room broadcast to WebSocket sessions
+        Each server does local room broadcast to in-memory sessions
 ```
 
 ### 2.2 Message Flow Sequence
@@ -222,7 +228,7 @@ For assignment runs, we plan:
 - 2 server scenario -> 2 consumer shards
 - 4 server scenario -> 4 consumer shards
 
-## 3. Test Results Template (Fill During Runs)
+## 3. Test Results
 
 ### 3.1 Metrics Requirements Checklist (Assignment Alignment)
 
@@ -256,8 +262,8 @@ Additional (recommended) metrics used in this report:
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | Single-server baseline (completed) | 1 | 1 | 500,000 | 32 | 1933.92 | 17 | 31 | 35 | 251 | 0 | 0 | ~0 (mostly zero) | ~0 (mostly zero) | Stable in 1C1S with low ACK/E2E latency and no queue backlog |
 | Load-balanced (2 servers, completed) | 2 | 2 | 500,000 | 32 | 7738.12 | 44 | 240 | 2855 | 3689 | 0 | 0 | 0 | ~0 | High ingress achieved, but RabbitMQ (`t3.small`) became the bottleneck at higher QPS with visible spike behavior |
-| Load-balanced (4 servers) | 4 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
-| Stress (4 servers) | 4 | 4 | 1,000,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+| Load-balanced (4 servers, completed) | 4 | 4 | 500,000 | 32 | 4844.71 | 37 | 52 | 100 | 820 | 0 | 0 | 0 | ~0 | Stable low queue-ready depth; RabbitMQ CPU saturates on `t3.small` and limits further scale-out gain |
+
 
 ### 3.3 Screenshot Checklist
 
@@ -331,35 +337,38 @@ Load-balanced (2C2S) evidence has been collected under `results/pics/2c2s`:
 
 #### C. 4-Instance Load Balanced Scenario
 
-- [ ] Client terminal output screenshot
-- [ ] ALB CloudWatch screenshot (distribution and latency)
-- [ ] RabbitMQ Overview screenshot
-- [ ] RabbitMQ Queues screenshot
-- [ ] EC2 system metrics screenshot(s)
+- [x] Client terminal output screenshot
+- [x] ALB CloudWatch screenshot (distribution and latency)
+- [x] RabbitMQ Overview screenshot
+- [x] RabbitMQ queue/rate evidence screenshot
+- [x] EC2 system metrics screenshot(s)
 - [ ] Optional stress run screenshot (1M messages)
 
+Load-balanced (4C4S) evidence has been collected under `results/pics/4c4s`:
+
+**Client Output (`metrics-4c4s.png`)**
+
+![4C4S Client Metrics](../../results/pics/4c4s/metrics-4c4s.png)
+
+**ALB Monitoring (`alb-4c4s.png`)**
+
+![4C4S ALB Monitoring](../../results/pics/4c4s/alb-4c4s.png)
+
+**RabbitMQ Overview (`mq-4c4s.png`)**
+
+![4C4S RabbitMQ Overview](../../results/pics/4c4s/mq-4c4s.png)
+
+**RabbitMQ Node Snapshot (`mq-4c4s-htop.png`)**
+
+![4C4S RabbitMQ Node Snapshot](../../results/pics/4c4s/mq-4c4s-htop.png)
+
 ### 3.4 Configuration Snapshot Per Run
-
-Fill one block per test run:
-
-- Run ID: `<TBD>`
-- Date/Time (PST): `<TBD>`
-- Git commit: `<TBD>`
-- Server image tag: `<TBD>`
-- Consumer image tag: `<TBD>`
-- `server_count`: `<TBD>`
-- `consumer_count`: `<TBD>`
-- `consumer_threads`: `<TBD>`
-- `consumer_prefetch`: `<TBD>`
-- `room_max_inflight`: `<TBD>`
-- `global_max_inflight`: `<TBD>`
-- Client config file: `<TBD>`
 
 Current filled run (1C1S):
 
 - Run ID: `1c1s-32t-500k`
 - Date/Time (PST): `2026-03-11`
-- Git commit: `<TBD>`
+- Git commit: `a7542fd (with local run-time config/report edits)`
 - Server image tag: `ghcr.io/eternity1824/chatflow-server-v2:v5`
 - Consumer image tag: `ghcr.io/eternity1824/chatflow-consumer:v5`
 - `server_count`: `1`
@@ -374,7 +383,7 @@ Current filled run (2C2S):
 
 - Run ID: `2c2s-32t-8000-500k`
 - Date/Time (PST): `2026-03-12`
-- Git commit: `<TBD>`
+- Git commit: `a7542fd (with local run-time config/report edits)`
 - Server image tag: `ghcr.io/eternity1824/chatflow-server-v2:v5`
 - Consumer image tag: `ghcr.io/eternity1824/chatflow-consumer:v5`
 - `server_count`: `2`
@@ -385,15 +394,24 @@ Current filled run (2C2S):
 - `global_max_inflight`: `1000`
 - Client config file: `config/client-part2-32-s2-8000.yml`
 
+Current filled run (4C4S):
+
+- Run ID: `4c4s-32t-5000-500k`
+- Date/Time (PST): `2026-03-12`
+- Git commit: `a7542fd (with local run-time config/report edits)`
+- Server image tag: `ghcr.io/eternity1824/chatflow-server-v2:v5`
+- Consumer image tag: `ghcr.io/eternity1824/chatflow-consumer:v5`
+- `server_count`: `4`
+- `consumer_count`: `4`
+- `consumer_threads`: `80`
+- `consumer_prefetch`: `200`
+- `room_max_inflight`: `16`
+- `global_max_inflight`: `2000`
+- Client config file: `config/client-part2-32-s4-5000.yml`
+
 ### 3.5 Queue Profile Assessment
 
 For each run, classify queue profile and explain:
-
-- Profile type: `Stable plateau` / `Sawtooth` / `Unstable`
-- Peak ready depth: `<TBD>`
-- Drain behavior: `<TBD>`
-- Redelivery/duplicate behavior: `<TBD>`
-- Bottleneck hypothesis: `<TBD>`
 
 Current 1C1S assessment:
 
@@ -411,6 +429,14 @@ Current 2C2S assessment:
 - Redelivery/duplicate behavior: `No significant redelivery spike shown in RabbitMQ overview screenshot`
 - Bottleneck hypothesis: `RabbitMQ node capacity (t3.small) is the primary bottleneck near 8k QPS target`
 
+Current 4C4S assessment:
+
+- Profile type: `Stable plateau with broker CPU pressure`
+- Peak ready depth: `0` (ready remained at zero in captured window)
+- Drain behavior: `Publish/consumer-ack stayed close around ~5.3k/s, with low queue-ready but non-zero unacked`
+- Redelivery/duplicate behavior: `No obvious redelivery spike on overview chart`
+- Bottleneck hypothesis: `RabbitMQ on t3.small saturates CPU (~99%), limiting benefit from additional server/consumer instances`
+
 ### 3.6 System Utilization Snapshot (Minimal Overhead Approach)
 
 Prometheus is not required for this assignment.  
@@ -424,13 +450,30 @@ Use the following low-overhead evidence:
   - `top -b -n 1` (or macOS equivalent when local)
   - optional: `iostat -x 1 5`, `sar -n DEV 1 5`
 
-### 3.7 Improvement Analysis (Fill After All Runs)
+### 3.7 Improvement Analysis
 
-- Throughput improvement from 1 -> 2 -> 4 servers: `<TBD>`
-- Latency trend as scale increases: `<TBD>`
-- Queue depth trend as scale increases: `<TBD>`
-- Resource bottleneck shifts (server vs consumer vs rabbit): `<TBD>`
-- Final tuned configuration and rationale: `<TBD>`
+- Throughput improvement from 1 -> 2 -> 4 servers:
+  - 1C1S: `1933.92 msg/s`
+  - 2C2S: `7738.12 msg/s` (about `4.00x` vs 1C1S)
+  - 4C4S: `4844.71 msg/s` (about `0.63x` vs 2C2S, constrained by broker)
+- Latency trend as scale increases:
+  - ACK p95: `17 -> 44 -> 37 ms`
+  - ACK p99: `31 -> 240 -> 52 ms`
+  - E2E p95: `35 -> 2855 -> 100 ms`
+  - E2E p99: `251 -> 3689 -> 820 ms`
+  - Note: 2C2S run used higher targetQps (8000), while 4C4S run used targetQps 5000.
+- Queue depth trend as scale increases:
+  - Ready depth stayed near zero in all captured windows.
+  - At higher ingress, unacked and queue total fluctuate, reflecting transient in-flight pressure rather than persistent backlog.
+- Resource bottleneck shifts (server vs consumer vs rabbit):
+  - 1C1S: no persistent queue bottleneck.
+  - 2C2S: RabbitMQ starts to dominate under high ingress.
+  - 4C4S: RabbitMQ is clearly the limiting component (CPU saturation near 99% in `mq-4c4s-htop.png`).
+- Final tuned configuration and rationale:
+  - client main threads: `32` (best stability/throughput tradeoff for this Netty event-loop client path)
+  - consumer mode: push (`basicConsume`) with tuned prefetch and async gRPC broadcast
+  - room/global inflight: tuned by scenario for throughput while preserving practical room behavior
+  - deployment for assignment evidence: 1C1S, 2C2S, 4C4S completed with screenshots and metrics
 
 Preliminary bottleneck note (2S2C high-QPS probe):
 
@@ -438,3 +481,14 @@ Preliminary bottleneck note (2S2C high-QPS probe):
 - Observed behavior: broker CPU approaches saturation, queue/rate curves show periodic spikes, and forwarding cannot keep up with ingress.
 - Interpretation: the small instance class is under-provisioned for this QPS range; burstable credit and runtime pause effects (including GC/scheduler jitter) amplify spike behavior.
 - Recommendation for subsequent 4S4C runs: upgrade RabbitMQ instance size first (e.g., `t3.medium` or larger) before attributing bottlenecks to server/consumer logic.
+
+### 3.8 Post-Assignment Architecture Direction
+
+For production-oriented evolution (beyond assignment scope), a better direction is:
+
+- co-locate lightweight consumer/broadcast workers with each server node to reduce cross-node fanout overhead
+- use a partitioned message log (or partitioned queue topology) keyed by `roomId` for predictable ordering and parallelism
+- add a dedicated `presence service` to track `user -> server` / `room -> server set` mappings
+- prefer local in-memory copy/broadcast whenever sender and target sessions are on the same server, and only do cross-node forwarding when required by presence lookup
+
+This design reduces unnecessary global fanout traffic and improves scale efficiency while keeping room-level ordering manageable.

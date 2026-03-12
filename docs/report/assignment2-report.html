@@ -1,0 +1,872 @@
+gi<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>CS6650 Assignment 2 Report</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="report-print.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">CS6650 Assignment 2 Report</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#cs6650-assignment-2-report"
+id="toc-cs6650-assignment-2-report">CS6650 Assignment 2 Report</a>
+<ul>
+<li><a href="#git-repository-url" id="toc-git-repository-url">1. Git
+Repository URL</a></li>
+<li><a href="#architecture-document-front-part"
+id="toc-architecture-document-front-part">2. Architecture Document
+(Front Part)</a>
+<ul>
+<li><a href="#system-architecture" id="toc-system-architecture">2.1
+System Architecture</a></li>
+<li><a href="#message-flow-sequence" id="toc-message-flow-sequence">2.2
+Message Flow Sequence</a></li>
+<li><a href="#queue-topology-design" id="toc-queue-topology-design">2.3
+Queue Topology Design</a></li>
+<li><a href="#consumer-threading-model"
+id="toc-consumer-threading-model">2.4 Consumer Threading Model</a></li>
+<li><a href="#client-thread-model-decision-why-no-128-in-final-runs"
+id="toc-client-thread-model-decision-why-no-128-in-final-runs">2.4.2
+Client Thread Model Decision (Why no 128+ in final runs)</a></li>
+<li><a href="#inflight-strategy-why-inflight8-and-why-keep-inflight1"
+id="toc-inflight-strategy-why-inflight8-and-why-keep-inflight1">2.4.1
+Inflight Strategy (Why <code>inflight=8</code>, and why keep
+<code>inflight=1</code>)</a></li>
+<li><a href="#load-balancing-configuration"
+id="toc-load-balancing-configuration">2.5 Load Balancing
+Configuration</a></li>
+<li><a href="#failure-handling-strategies"
+id="toc-failure-handling-strategies">2.6 Failure Handling
+Strategies</a></li>
+<li><a href="#multi-consumer-scaling-plan-and-terraform-impact"
+id="toc-multi-consumer-scaling-plan-and-terraform-impact">2.7
+Multi-Consumer Scaling Plan and Terraform Impact</a></li>
+</ul></li>
+<li><a href="#test-results" id="toc-test-results">3. Test Results</a>
+<ul>
+<li><a href="#metrics-requirements-checklist-assignment-alignment"
+id="toc-metrics-requirements-checklist-assignment-alignment">3.1 Metrics
+Requirements Checklist (Assignment Alignment)</a></li>
+<li><a href="#test-matrix-and-summary-table"
+id="toc-test-matrix-and-summary-table">3.2 Test Matrix and Summary
+Table</a></li>
+<li><a href="#screenshot-checklist" id="toc-screenshot-checklist">3.3
+Screenshot Checklist</a></li>
+<li><a href="#configuration-snapshot-per-run"
+id="toc-configuration-snapshot-per-run">3.4 Configuration Snapshot Per
+Run</a></li>
+<li><a href="#queue-profile-assessment"
+id="toc-queue-profile-assessment">3.5 Queue Profile Assessment</a></li>
+<li><a href="#system-utilization-snapshot-minimal-overhead-approach"
+id="toc-system-utilization-snapshot-minimal-overhead-approach">3.6
+System Utilization Snapshot (Minimal Overhead Approach)</a></li>
+<li><a href="#improvement-analysis" id="toc-improvement-analysis">3.7
+Improvement Analysis</a></li>
+<li><a href="#post-assignment-architecture-direction"
+id="toc-post-assignment-architecture-direction">3.8 Post-Assignment
+Architecture Direction</a></li>
+</ul></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="cs6650-assignment-2-report">CS6650 Assignment 2 Report</h1>
+<ul>
+<li>Course: CS6650 Building Scalable Distributed Systems</li>
+<li>Assignment: Assignment 2 - Adding Message Distribution and Queue
+Management</li>
+<li>Date: 2026-03-12</li>
+<li>Repository URL:
+<code>&lt;https://github.com/Eternity1824/chatflow.git&gt;</code></li>
+</ul>
+<h2 id="git-repository-url">1. Git Repository URL</h2>
+<p><code>&lt;https://github.com/Eternity1824/chatflow.git&gt;</code></p>
+<p>The repository includes the required folders: -
+<code>/server-v2</code> - <code>/consumer</code> -
+<code>/deployment</code> - <code>/monitoring</code></p>
+<h2 id="architecture-document-front-part">2. Architecture Document
+(Front Part)</h2>
+<h3 id="system-architecture">2.1 System Architecture</h3>
+<p>The deployed system separates concerns into ingress, queueing, and
+fan-out layers:</p>
+<ol type="1">
+<li>Clients connect via WebSocket to AWS ALB.</li>
+<li>ALB forwards/sticks each connection to one <code>server-v2</code>
+instance.</li>
+<li><code>server-v2</code> validates incoming chat messages and
+publishes them to RabbitMQ.</li>
+<li>RabbitMQ routes messages by room (<code>room.{roomId}</code>).</li>
+<li><code>consumer</code> instances (room-sharded) read assigned room
+queues in push mode, process protobuf payloads, and call each server’s
+internal gRPC broadcast service.</li>
+<li>Each <code>server-v2</code> instance broadcasts to its local
+in-memory room sessions.</li>
+</ol>
+<pre class="text"><code>Client Threads
+    |
+    v
+AWS ALB (sticky sessions)
+    |
+    +----------------------+----------------------+----------------------+
+    v                      v                      v
+server-v2 #1           server-v2 #2          server-v2 #N
+(validate + publish)   (validate + publish)  (validate + publish)
+    \                      |                      /
+     \_____________________|_____________________/
+                       |
+                       v
+          RabbitMQ topic exchange: chat.exchange
+                       |
+          routing key: room.{roomId}
+                       |
+      +----------------+----------------+
+      v                                 v
+  queue room.1 ...                    queue room.20
+      |                                 |
+      +------------ room-sharded -------+
+                    assignment
+                      |
+                      v
+      +---------------------------------------------+
+      | Consumer Instance #1 (worker pool)          |
+      | Consumer Instance #2 (worker pool)          |
+      | ...                                         |
+      | Consumer Instance #M (worker pool)          |
+      +---------------------------------------------+
+                      |
+                      v
+      gRPC InternalBroadcast.Broadcast (fanout to all servers)
+                      |
+                      v
+        Each server does local room broadcast to in-memory sessions</code></pre>
+<h3 id="message-flow-sequence">2.2 Message Flow Sequence</h3>
+<h4 id="a.-producer-path-client---queue">A. Producer path (client -&gt;
+queue)</h4>
+<ol type="1">
+<li>Client sends <code>JOIN/TEXT/LEAVE</code> to
+<code>/chat?roomId=&lt;room&gt;</code>.</li>
+<li><code>RoomIdExtractorHandler</code> validates room ID and serves
+<code>/health</code> checks.</li>
+<li><code>WebSocketChatHandlerV2</code> parses JSON, validates fields,
+enforces <code>JOIN</code> before <code>TEXT</code>.</li>
+<li>Server creates <code>QueueChatMessage</code> with:
+<ul>
+<li><code>messageId</code> (UUID)</li>
+<li><code>roomId</code>, <code>userId</code>, <code>username</code>,
+<code>message</code>, <code>timestamp</code>,
+<code>messageType</code></li>
+<li><code>serverId</code>, <code>clientIp</code></li>
+</ul></li>
+<li><code>RabbitMqPublisher</code> converts message to protobuf bytes
+and publishes to <code>chat.exchange</code> with routing key
+<code>room.{roomId}</code>.</li>
+<li>Publisher confirm is handled with async confirm tracking
+(configurable sync wait can still be enabled).</li>
+</ol>
+<h4 id="b.-consumer-path-queue---client-broadcast">B. Consumer path
+(queue -&gt; client broadcast)</h4>
+<ol type="1">
+<li><code>ProtobufConsumerWorker</code> subscribes queues with
+<code>basicConsume(..., autoAck=false)</code> and per-worker
+<code>basicQos(prefetch)</code>.</li>
+<li>Payload is parsed as protobuf; malformed payloads are ACKed and
+dropped.</li>
+<li>Dedup check (<code>messageId</code>) avoids duplicate side
+effects.</li>
+<li>If missing, room sequence is assigned by
+<code>RoomSequenceManager</code>.</li>
+<li>Delivery enters per-room pending queue; worker dispatches when
+<code>roomMaxInFlight</code> and <code>globalMaxInFlight</code>
+allow.</li>
+<li><code>GrpcBroadcastClient</code> sends protobuf message to each
+server gRPC endpoint.</li>
+<li>On success: queue message is ACKed.</li>
+<li>On failure: retry with exponential backoff + jitter; if retries
+exhausted, <code>NACK(requeue=false)</code>.</li>
+</ol>
+<h3 id="queue-topology-design">2.3 Queue Topology Design</h3>
+<ul>
+<li>Broker: RabbitMQ (durable topic exchange).</li>
+<li>Exchange: <code>chat.exchange</code>.</li>
+<li>Routing key convention: <code>room.{roomId}</code>.</li>
+<li>Queue model: one queue per room, default range <code>room.1</code>
+to <code>room.20</code>.</li>
+<li>Queue durability: enabled.</li>
+<li>Queue controls:
+<ul>
+<li><code>x-message-ttl</code> default <code>60000 ms</code></li>
+<li><code>x-max-length</code> default <code>10000</code></li>
+</ul></li>
+<li>Publisher reliability:
+<ul>
+<li>persistent message properties</li>
+<li>mandatory publish flag</li>
+<li>publisher confirms</li>
+</ul></li>
+</ul>
+<p>This topology isolates room traffic, keeps ordering naturally scoped
+per queue, and allows independent tuning via queue and consumer
+parameters.</p>
+<h3 id="consumer-threading-model">2.4 Consumer Threading Model</h3>
+<ul>
+<li>Entry point: <code>ConsumerApp</code>.</li>
+<li>Threads: configurable fixed-size worker pool
+(<code>CHATFLOW_CONSUMER_THREADS</code>).</li>
+<li>Queue assignment: round-robin fair split across workers
+(<code>RoomAssignment.assignQueues</code>).</li>
+<li>Worker model:
+<ul>
+<li>one RabbitMQ connection + channel per worker</li>
+<li>configurable prefetch (<code>basicQos</code>)</li>
+<li>event-driven callback (<code>basicConsume</code>) on Netty
+EventLoop</li>
+<li>per-room pending queue + inflight gating</li>
+</ul></li>
+<li>Shared state (thread-safe):
+<ul>
+<li>dedup cache (<code>MessageDeduplicator</code>)</li>
+<li>per-room sequence counters (<code>RoomSequenceManager</code>)</li>
+<li>metrics counters (<code>ConsumerMetrics</code>)</li>
+</ul></li>
+<li>Health/observability:
+<ul>
+<li><code>/health</code> returns <code>OK</code></li>
+<li><code>/metrics</code> exports JSON counters</li>
+</ul></li>
+</ul>
+<p>Note: scaling is configuration-driven (threads + instance count +
+room shard assignment), not full autoscaling yet.</p>
+<h3 id="client-thread-model-decision-why-no-128-in-final-runs">2.4.2
+Client Thread Model Decision (Why no 128+ in final runs)</h3>
+<p>For this implementation, client send path is Netty event-loop +
+non-blocking write/flush with a global rate limiter. Under this model,
+increasing application sender threads beyond a moderate value did not
+improve throughput and increased instability.</p>
+<p>Observed on March 11, 2026 (single server + single consumer,
+targetQps=4500):</p>
+<ul>
+<li>32 threads: ~4366 msg/s, lower error ratio, better E2E p99</li>
+<li>64 threads: ~4311 msg/s, higher error ratio than 32</li>
+<li>128 threads: ~4224 msg/s, highest error ratio and worse tail
+latency</li>
+</ul>
+<p>Conclusion: - final load tests use <strong>32 sender threads</strong>
+as default profile - 64-thread runs are kept only as reference, because
+on this Netty event-loop path they add context-switch overhead and
+higher tail instability without throughput gain - exclude 128/256/512
+from final optimization set because extra sender threads add
+context-switch overhead without throughput gain in this Netty-based
+path</p>
+<p>Netty-specific rationale: - effective concurrency comes from event
+loops + non-blocking flush, not from continuously increasing application
+sender threads - once event loops are saturated, raising sender thread
+count mostly increases scheduling/queue contention instead of useful I/O
+work</p>
+<h3 id="inflight-strategy-why-inflight8-and-why-keep-inflight1">2.4.1
+Inflight Strategy (Why <code>inflight=8</code>, and why keep
+<code>inflight=1</code>)</h3>
+<p>We use two operation modes intentionally:</p>
+<ul>
+<li>Throughput mode (<code>CHATFLOW_ROOM_MAX_INFLIGHT=8</code>):
+<ul>
+<li>goal: maximize queue drain rate and overall throughput</li>
+<li>tradeoff: room-local delivery order may be relaxed under bursty
+load</li>
+<li>mitigation: include room sequence in payload and let client reorder
+by sequence when needed</li>
+</ul></li>
+<li>Strict-order mode (<code>CHATFLOW_ROOM_MAX_INFLIGHT=1</code>):
+<ul>
+<li>goal: preserve room-local processing order in consumer path</li>
+<li>tradeoff: lower max throughput due to serialized per-room
+dispatch</li>
+<li>use: validation runs and requirement-focused evidence</li>
+</ul></li>
+</ul>
+<p>This dual-mode strategy keeps one profile for peak performance tuning
+and one profile for strict room-order guarantee.</p>
+<h3 id="load-balancing-configuration">2.5 Load Balancing
+Configuration</h3>
+<p>Infrastructure is provisioned with Terraform
+(<code>deployment/terraform</code>):</p>
+<ul>
+<li>ALB listener: HTTP <code>:80</code> -&gt; server target group.</li>
+<li>Target group protocol/port: HTTP on <code>chat_port</code> (default
+<code>8080</code>).</li>
+<li>Sticky sessions: enabled (<code>lb_cookie</code>, default
+<code>3600s</code>).</li>
+<li>Idle timeout: default <code>120s</code> (satisfies WebSocket &gt;
+60s requirement).</li>
+<li>Health check:
+<ul>
+<li>path <code>/health</code></li>
+<li>interval <code>30s</code></li>
+<li>timeout <code>5s</code></li>
+<li>healthy threshold <code>2</code></li>
+<li>unhealthy threshold <code>3</code></li>
+</ul></li>
+<li>Server fleet size is configurable (<code>server_count</code>) for
+1/2/4-instance test scenarios.</li>
+</ul>
+<h3 id="failure-handling-strategies">2.6 Failure Handling
+Strategies</h3>
+<ol type="1">
+<li>Queue publish protection (server side)</li>
+</ol>
+<ul>
+<li>Channel pooling reduces connection churn.</li>
+<li>Circuit breaker opens after consecutive publish failures and rejects
+requests temporarily.</li>
+<li>Half-open probe allows controlled recovery.</li>
+</ul>
+<ol start="2" type="1">
+<li>Consumer delivery resilience</li>
+</ol>
+<ul>
+<li>At-least-once semantics with manual ACK.</li>
+<li>Retry with bounded exponential backoff and jitter.</li>
+<li>Retry count propagated via message header
+(<code>x-chatflow-retry</code>).</li>
+</ul>
+<ol start="3" type="1">
+<li>Duplicate and ordering controls</li>
+</ol>
+<ul>
+<li>Dedup in consumer (<code>MessageDeduplicator</code>) and internal
+broadcast path (<code>RecentMessageTracker</code>).</li>
+<li>Room-local sequencing via <code>RoomSequenceManager</code> when
+sequence is absent.</li>
+</ul>
+<ol start="4" type="1">
+<li>Operational safety</li>
+</ol>
+<ul>
+<li>Health endpoints on server and consumer.</li>
+<li>Periodic metrics logging and <code>/metrics</code> endpoint for
+quick diagnosis.</li>
+<li>Graceful shutdown hooks close workers and servers.</li>
+</ul>
+<h3 id="multi-consumer-scaling-plan-and-terraform-impact">2.7
+Multi-Consumer Scaling Plan and Terraform Impact</h3>
+<p>Given the fixed room range (<code>1..20</code>), horizontal scaling
+is done by room sharding instead of random queue competition.</p>
+<p>Recommended shard rule: -
+<code>owner = (roomId - 1) % consumer_instance_count</code> - consumer
+instance <code>i</code> only consumes rooms where
+<code>owner == i</code></p>
+<p>Benefits: - predictable load split - better control of room-local
+ordering semantics - simpler bottleneck analysis per shard</p>
+<p>Terraform/deployment impact: - add <code>consumer_count</code>
+(number of consumer EC2 instances) - pass shard env vars per consumer
+instance: - <code>CHATFLOW_CONSUMER_INSTANCE_INDEX</code> -
+<code>CHATFLOW_CONSUMER_INSTANCE_COUNT</code> - for gRPC internal
+fan-out, ensure security group allows
+<code>consumer -&gt; server:9090</code></p>
+<p>For assignment runs, we plan: - 1 server scenario -&gt; 1 consumer
+shard - 2 server scenario -&gt; 2 consumer shards - 4 server scenario
+-&gt; 4 consumer shards</p>
+<h2 id="test-results">3. Test Results</h2>
+<h3 id="metrics-requirements-checklist-assignment-alignment">3.1 Metrics
+Requirements Checklist (Assignment Alignment)</h3>
+<p>For each run, ensure the following metrics are captured:</p>
+<ul>
+<li>Client metrics:
+<ul>
+<li>Total runtime</li>
+<li>Throughput (messages/second)</li>
+<li>Connection failures</li>
+<li>Retry attempts</li>
+</ul></li>
+<li>Queue metrics:
+<ul>
+<li>Peak queue depth</li>
+<li>Average queue depth</li>
+<li>Consumer rate</li>
+<li>Producer rate</li>
+</ul></li>
+<li>System metrics:
+<ul>
+<li>CPU usage (all instances)</li>
+<li>Memory usage</li>
+<li>Network I/O</li>
+<li>Disk I/O</li>
+</ul></li>
+</ul>
+<p>Additional (recommended) metrics used in this report:</p>
+<ul>
+<li>ACK latency (<code>mean/median/p95/p99</code>)</li>
+<li>Broadcast E2E latency (<code>mean/median/p95/p99</code>)</li>
+<li>Error responses and parse errors</li>
+</ul>
+<h3 id="test-matrix-and-summary-table">3.2 Test Matrix and Summary
+Table</h3>
+<table>
+<colgroup>
+<col style="width: 5%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 6%" />
+<col style="width: 5%" />
+</colgroup>
+<thead>
+<tr>
+<th>Scenario</th>
+<th style="text-align: right;">Server Count</th>
+<th style="text-align: right;">Consumer Count</th>
+<th style="text-align: right;">Message Count</th>
+<th style="text-align: right;">Client Threads</th>
+<th style="text-align: right;">Throughput (msg/s)</th>
+<th style="text-align: right;">ACK p95 (ms)</th>
+<th style="text-align: right;">ACK p99 (ms)</th>
+<th style="text-align: right;">E2E p95 (ms)</th>
+<th style="text-align: right;">E2E p99 (ms)</th>
+<th style="text-align: right;">Conn Failures</th>
+<th style="text-align: right;">Retry Attempts</th>
+<th style="text-align: right;">Peak Queue Ready</th>
+<th style="text-align: right;">Avg Queue Ready</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single-server baseline (completed)</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">500,000</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">1933.92</td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">31</td>
+<td style="text-align: right;">35</td>
+<td style="text-align: right;">251</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">~0 (mostly zero)</td>
+<td style="text-align: right;">~0 (mostly zero)</td>
+<td>Stable in 1C1S with low ACK/E2E latency and no queue backlog</td>
+</tr>
+<tr>
+<td>Load-balanced (2 servers, completed)</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">500,000</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">7738.12</td>
+<td style="text-align: right;">44</td>
+<td style="text-align: right;">240</td>
+<td style="text-align: right;">2855</td>
+<td style="text-align: right;">3689</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">~0</td>
+<td>High ingress achieved, but RabbitMQ (<code>t3.small</code>) became
+the bottleneck at higher QPS with visible spike behavior</td>
+</tr>
+<tr>
+<td>Load-balanced (4 servers, completed)</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">500,000</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">4844.71</td>
+<td style="text-align: right;">37</td>
+<td style="text-align: right;">52</td>
+<td style="text-align: right;">100</td>
+<td style="text-align: right;">820</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">~0</td>
+<td>Stable low queue-ready depth; RabbitMQ CPU saturates on
+<code>t3.small</code> and limits further scale-out gain</td>
+</tr>
+</tbody>
+</table>
+<h3 id="screenshot-checklist">3.3 Screenshot Checklist</h3>
+<h4 id="a.-single-instance-scenario">A. Single Instance Scenario</h4>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Client terminal output
+screenshot (performance summary)</label></li>
+<li><label><input type="checkbox" checked="" />RabbitMQ Overview
+screenshot (queue depth + message rates)</label></li>
+<li><label><input type="checkbox" checked="" />RabbitMQ Queues
+screenshot (all room queues with ready/unacked/rates)</label></li>
+<li><label><input type="checkbox" checked="" />EC2 system metrics
+screenshot(s): CPU/Network/Disk</label></li>
+<li><label><input type="checkbox" checked="" />Memory evidence
+screenshot (<code>free -m</code> or <code>top</code>)</label></li>
+</ul>
+<p>Single-instance (1C1S) evidence has been collected under
+<code>results/pics</code>:</p>
+<p><strong>Client Output (<code>metrics-1s1c.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/1c1s/metrics-1s1c.png"
+alt="1C1S Client Metrics" />
+<figcaption aria-hidden="true">1C1S Client Metrics</figcaption>
+</figure>
+<p><strong>RabbitMQ Queues
+(<code>rabbitmq-1s1c-32.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/1c1s/rabbitmq-1s1c-32.png"
+alt="1C1S RabbitMQ Queues" />
+<figcaption aria-hidden="true">1C1S RabbitMQ Queues</figcaption>
+</figure>
+<p><strong>ALB Monitoring (<code>alb-1c1s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/1c1s/alb-1c1s.png"
+alt="1C1S ALB Monitoring" />
+<figcaption aria-hidden="true">1C1S ALB Monitoring</figcaption>
+</figure>
+<p><strong>Server System Snapshot
+(<code>server-1s1c-htop.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/1c1s/server-1s1c-htop.png"
+alt="1C1S Server System Snapshot" />
+<figcaption aria-hidden="true">1C1S Server System Snapshot</figcaption>
+</figure>
+<p><strong>Consumer System Snapshot
+(<code>consumer-1s1c.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/1c1s/consumer-1s1c.png"
+alt="1C1S Consumer System Snapshot" />
+<figcaption aria-hidden="true">1C1S Consumer System
+Snapshot</figcaption>
+</figure>
+<p><strong>RabbitMQ Node Snapshot
+(<code>rabbitmq-1s1c-htop.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/1c1s/rabbitmq-1s1c-htop.png"
+alt="1C1S RabbitMQ Node Snapshot" />
+<figcaption aria-hidden="true">1C1S RabbitMQ Node Snapshot</figcaption>
+</figure>
+<h4 id="b.-2-instance-load-balanced-scenario">B. 2-Instance Load
+Balanced Scenario</h4>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Client terminal output
+screenshot</label></li>
+<li><label><input type="checkbox" checked="" />ALB CloudWatch screenshot
+(RequestCount, TargetResponseTime, HealthyHostCount)</label></li>
+<li><label><input type="checkbox" checked="" />RabbitMQ Overview
+screenshot</label></li>
+<li><label><input type="checkbox" checked="" />RabbitMQ Queues
+screenshot</label></li>
+<li><label><input type="checkbox" checked="" />EC2 system metrics
+screenshot(s)</label></li>
+</ul>
+<p>Load-balanced (2C2S) evidence has been collected under
+<code>results/pics/2c2s</code>:</p>
+<p><strong>Client Output (<code>metrics-2c2s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/2c2s/metrics-2c2s.png"
+alt="2C2S Client Metrics" />
+<figcaption aria-hidden="true">2C2S Client Metrics</figcaption>
+</figure>
+<p><strong>ALB Monitoring (<code>alb-2c2s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/2c2s/alb-2c2s.png"
+alt="2C2S ALB Monitoring" />
+<figcaption aria-hidden="true">2C2S ALB Monitoring</figcaption>
+</figure>
+<p><strong>RabbitMQ Console
+(<code>rabbitmq-2c2s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/2c2s/rabbitmq-2c2s.png"
+alt="2C2S RabbitMQ" />
+<figcaption aria-hidden="true">2C2S RabbitMQ</figcaption>
+</figure>
+<p><strong>Server System Snapshot
+(<code>server-2c2s-htop.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/2c2s/server-2c2s-htop.png"
+alt="2C2S Server System Snapshot" />
+<figcaption aria-hidden="true">2C2S Server System Snapshot</figcaption>
+</figure>
+<p><strong>Consumer System Snapshot
+(<code>consumer-2c2s-htop.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/2c2s/consumer-2c2s-htop.png"
+alt="2C2S Consumer System Snapshot" />
+<figcaption aria-hidden="true">2C2S Consumer System
+Snapshot</figcaption>
+</figure>
+<p><strong>RabbitMQ Node Snapshot
+(<code>rabbitmq-2c2s-htop.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/2c2s/rabbitmq-2c2s-htop.png"
+alt="2C2S RabbitMQ Node Snapshot" />
+<figcaption aria-hidden="true">2C2S RabbitMQ Node Snapshot</figcaption>
+</figure>
+<h4 id="c.-4-instance-load-balanced-scenario">C. 4-Instance Load
+Balanced Scenario</h4>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Client terminal output
+screenshot</label></li>
+<li><label><input type="checkbox" checked="" />ALB CloudWatch screenshot
+(distribution and latency)</label></li>
+<li><label><input type="checkbox" checked="" />RabbitMQ Overview
+screenshot</label></li>
+<li><label><input type="checkbox" checked="" />RabbitMQ queue/rate
+evidence screenshot</label></li>
+<li><label><input type="checkbox" checked="" />EC2 system metrics
+screenshot(s)</label></li>
+<li><label><input type="checkbox" />Optional stress run screenshot (1M
+messages)</label></li>
+</ul>
+<p>Load-balanced (4C4S) evidence has been collected under
+<code>results/pics/4c4s</code>:</p>
+<p><strong>Client Output (<code>metrics-4c4s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/4c4s/metrics-4c4s.png"
+alt="4C4S Client Metrics" />
+<figcaption aria-hidden="true">4C4S Client Metrics</figcaption>
+</figure>
+<p><strong>ALB Monitoring (<code>alb-4c4s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/4c4s/alb-4c4s.png"
+alt="4C4S ALB Monitoring" />
+<figcaption aria-hidden="true">4C4S ALB Monitoring</figcaption>
+</figure>
+<p><strong>RabbitMQ Overview (<code>mq-4c4s.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/4c4s/mq-4c4s.png"
+alt="4C4S RabbitMQ Overview" />
+<figcaption aria-hidden="true">4C4S RabbitMQ Overview</figcaption>
+</figure>
+<p><strong>RabbitMQ Node Snapshot
+(<code>mq-4c4s-htop.png</code>)</strong></p>
+<figure>
+<img src="../../results/pics/4c4s/mq-4c4s-htop.png"
+alt="4C4S RabbitMQ Node Snapshot" />
+<figcaption aria-hidden="true">4C4S RabbitMQ Node Snapshot</figcaption>
+</figure>
+<h3 id="configuration-snapshot-per-run">3.4 Configuration Snapshot Per
+Run</h3>
+<p>Current filled run (1C1S):</p>
+<ul>
+<li>Run ID: <code>1c1s-32t-500k</code></li>
+<li>Date/Time (PST): <code>2026-03-11</code></li>
+<li>Git commit:
+<code>a7542fd (with local run-time config/report edits)</code></li>
+<li>Server image tag:
+<code>ghcr.io/eternity1824/chatflow-server-v2:v5</code></li>
+<li>Consumer image tag:
+<code>ghcr.io/eternity1824/chatflow-consumer:v5</code></li>
+<li><code>server_count</code>: <code>1</code></li>
+<li><code>consumer_count</code>: <code>1</code></li>
+<li><code>consumer_threads</code>: <code>80</code></li>
+<li><code>consumer_prefetch</code>: <code>200</code></li>
+<li><code>room_max_inflight</code>: <code>16</code></li>
+<li><code>global_max_inflight</code>: <code>2000</code></li>
+<li>Client config file:
+<code>config/client-part2-32-s1-4500.yml</code></li>
+</ul>
+<p>Current filled run (2C2S):</p>
+<ul>
+<li>Run ID: <code>2c2s-32t-8000-500k</code></li>
+<li>Date/Time (PST): <code>2026-03-12</code></li>
+<li>Git commit:
+<code>a7542fd (with local run-time config/report edits)</code></li>
+<li>Server image tag:
+<code>ghcr.io/eternity1824/chatflow-server-v2:v5</code></li>
+<li>Consumer image tag:
+<code>ghcr.io/eternity1824/chatflow-consumer:v5</code></li>
+<li><code>server_count</code>: <code>2</code></li>
+<li><code>consumer_count</code>: <code>2</code></li>
+<li><code>consumer_threads</code>: <code>40</code></li>
+<li><code>consumer_prefetch</code>: <code>160</code></li>
+<li><code>room_max_inflight</code>: <code>12</code></li>
+<li><code>global_max_inflight</code>: <code>1000</code></li>
+<li>Client config file:
+<code>config/client-part2-32-s2-8000.yml</code></li>
+</ul>
+<p>Current filled run (4C4S):</p>
+<ul>
+<li>Run ID: <code>4c4s-32t-5000-500k</code></li>
+<li>Date/Time (PST): <code>2026-03-12</code></li>
+<li>Git commit:
+<code>a7542fd (with local run-time config/report edits)</code></li>
+<li>Server image tag:
+<code>ghcr.io/eternity1824/chatflow-server-v2:v5</code></li>
+<li>Consumer image tag:
+<code>ghcr.io/eternity1824/chatflow-consumer:v5</code></li>
+<li><code>server_count</code>: <code>4</code></li>
+<li><code>consumer_count</code>: <code>4</code></li>
+<li><code>consumer_threads</code>: <code>80</code></li>
+<li><code>consumer_prefetch</code>: <code>200</code></li>
+<li><code>room_max_inflight</code>: <code>16</code></li>
+<li><code>global_max_inflight</code>: <code>2000</code></li>
+<li>Client config file:
+<code>config/client-part2-32-s4-5000.yml</code></li>
+</ul>
+<h3 id="queue-profile-assessment">3.5 Queue Profile Assessment</h3>
+<p>For each run, classify queue profile and explain:</p>
+<p>Current 1C1S assessment:</p>
+<ul>
+<li>Profile type: <code>Stable plateau</code> (publish/ack rates close;
+queue ready near zero)</li>
+<li>Peak ready depth: <code>~0</code> (no meaningful backlog in captured
+window)</li>
+<li>Drain behavior:
+<code>Producer and consumer rates stay close; queue drains in-window</code></li>
+<li>Redelivery/duplicate behavior:
+<code>No major redelivery spike observed in screenshots</code></li>
+<li>Bottleneck hypothesis:
+<code>In 1C1S, system is network/ingress limited before queue backlog builds</code></li>
+</ul>
+<p>Current 2C2S assessment:</p>
+<ul>
+<li>Profile type: <code>Mostly stable with spike episodes</code></li>
+<li>Peak ready depth: <code>0</code> (ready queue stayed near zero in
+captured window)</li>
+<li>Drain behavior:
+<code>Consumer ACK rate tracks publish closely, but Unacked/total bursts appear under high ingress</code></li>
+<li>Redelivery/duplicate behavior:
+<code>No significant redelivery spike shown in RabbitMQ overview screenshot</code></li>
+<li>Bottleneck hypothesis:
+<code>RabbitMQ node capacity (t3.small) is the primary bottleneck near 8k QPS target</code></li>
+</ul>
+<p>Current 4C4S assessment:</p>
+<ul>
+<li>Profile type:
+<code>Stable plateau with broker CPU pressure</code></li>
+<li>Peak ready depth: <code>0</code> (ready remained at zero in captured
+window)</li>
+<li>Drain behavior:
+<code>Publish/consumer-ack stayed close around ~5.3k/s, with low queue-ready but non-zero unacked</code></li>
+<li>Redelivery/duplicate behavior:
+<code>No obvious redelivery spike on overview chart</code></li>
+<li>Bottleneck hypothesis:
+<code>RabbitMQ on t3.small saturates CPU (~99%), limiting benefit from additional server/consumer instances</code></li>
+</ul>
+<h3 id="system-utilization-snapshot-minimal-overhead-approach">3.6
+System Utilization Snapshot (Minimal Overhead Approach)</h3>
+<p>Prometheus is not required for this assignment.<br />
+Use the following low-overhead evidence:</p>
+<ul>
+<li>CloudWatch:
+<ul>
+<li>ALB: RequestCount, TargetResponseTime, HealthyHostCount</li>
+<li>EC2: CPUUtilization, NetworkIn/Out,
+DiskReadBytes/DiskWriteBytes</li>
+</ul></li>
+<li>On-instance commands (during run):
+<ul>
+<li><code>free -m</code></li>
+<li><code>top -b -n 1</code> (or macOS equivalent when local)</li>
+<li>optional: <code>iostat -x 1 5</code>,
+<code>sar -n DEV 1 5</code></li>
+</ul></li>
+</ul>
+<h3 id="improvement-analysis">3.7 Improvement Analysis</h3>
+<ul>
+<li>Throughput improvement from 1 -&gt; 2 -&gt; 4 servers:
+<ul>
+<li>1C1S: <code>1933.92 msg/s</code></li>
+<li>2C2S: <code>7738.12 msg/s</code> (about <code>4.00x</code> vs
+1C1S)</li>
+<li>4C4S: <code>4844.71 msg/s</code> (about <code>0.63x</code> vs 2C2S,
+constrained by broker)</li>
+</ul></li>
+<li>Latency trend as scale increases:
+<ul>
+<li>ACK p95: <code>17 -&gt; 44 -&gt; 37 ms</code></li>
+<li>ACK p99: <code>31 -&gt; 240 -&gt; 52 ms</code></li>
+<li>E2E p95: <code>35 -&gt; 2855 -&gt; 100 ms</code></li>
+<li>E2E p99: <code>251 -&gt; 3689 -&gt; 820 ms</code></li>
+<li>Note: 2C2S run used higher targetQps (8000), while 4C4S run used
+targetQps 5000.</li>
+</ul></li>
+<li>Queue depth trend as scale increases:
+<ul>
+<li>Ready depth stayed near zero in all captured windows.</li>
+<li>At higher ingress, unacked and queue total fluctuate, reflecting
+transient in-flight pressure rather than persistent backlog.</li>
+</ul></li>
+<li>Resource bottleneck shifts (server vs consumer vs rabbit):
+<ul>
+<li>1C1S: no persistent queue bottleneck.</li>
+<li>2C2S: RabbitMQ starts to dominate under high ingress.</li>
+<li>4C4S: RabbitMQ is clearly the limiting component (CPU saturation
+near 99% in <code>mq-4c4s-htop.png</code>).</li>
+</ul></li>
+<li>Final tuned configuration and rationale:
+<ul>
+<li>client main threads: <code>32</code> (best stability/throughput
+tradeoff for this Netty event-loop client path)</li>
+<li>consumer mode: push (<code>basicConsume</code>) with tuned prefetch
+and async gRPC broadcast</li>
+<li>room/global inflight: tuned by scenario for throughput while
+preserving practical room behavior</li>
+<li>deployment for assignment evidence: 1C1S, 2C2S, 4C4S completed with
+screenshots and metrics</li>
+</ul></li>
+</ul>
+<p>Preliminary bottleneck note (2S2C high-QPS probe):</p>
+<ul>
+<li>At targetQps around <code>8000</code>, the RabbitMQ node
+(<code>t3.small</code>) becomes the primary bottleneck.</li>
+<li>Observed behavior: broker CPU approaches saturation, queue/rate
+curves show periodic spikes, and forwarding cannot keep up with
+ingress.</li>
+<li>Interpretation: the small instance class is under-provisioned for
+this QPS range; burstable credit and runtime pause effects (including
+GC/scheduler jitter) amplify spike behavior.</li>
+<li>Recommendation for subsequent 4S4C runs: upgrade RabbitMQ instance
+size first (e.g., <code>t3.medium</code> or larger) before attributing
+bottlenecks to server/consumer logic.</li>
+</ul>
+<h3 id="post-assignment-architecture-direction">3.8 Post-Assignment
+Architecture Direction</h3>
+<p>For production-oriented evolution (beyond assignment scope), a better
+direction is:</p>
+<ul>
+<li>co-locate lightweight consumer/broadcast workers with each server
+node to reduce cross-node fanout overhead</li>
+<li>use a partitioned message log (or partitioned queue topology) keyed
+by <code>roomId</code> for predictable ordering and parallelism</li>
+<li>add a dedicated <code>presence service</code> to track
+<code>user -&gt; server</code> / <code>room -&gt; server set</code>
+mappings</li>
+<li>prefer local in-memory copy/broadcast whenever sender and target
+sessions are on the same server, and only do cross-node forwarding when
+required by presence lookup</li>
+</ul>
+<p>This design reduces unnecessary global fanout traffic and improves
+scale efficiency while keeping room-level ordering manageable.</p>
+</body>
+</html>
