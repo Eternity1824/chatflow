@@ -136,8 +136,13 @@ Observed on March 11, 2026 (single server + single consumer, targetQps=4500):
 - 128 threads: ~4224 msg/s, highest error ratio and worse tail latency
 
 Conclusion:
-- keep 64-and-below profiles for final tuning and reporting
+- final load tests use **32 sender threads** as default profile
+- 64-thread runs are kept only as reference, because on this Netty event-loop path they add context-switch overhead and higher tail instability without throughput gain
 - exclude 128/256/512 from final optimization set because extra sender threads add context-switch overhead without throughput gain in this Netty-based path
+
+Netty-specific rationale:
+- effective concurrency comes from event loops + non-blocking flush, not from continuously increasing application sender threads
+- once event loops are saturated, raising sender thread count mostly increases scheduling/queue contention instead of useful I/O work
 
 ### 2.4.1 Inflight Strategy (Why `inflight=8`, and why keep `inflight=1`)
 
@@ -249,8 +254,8 @@ Additional (recommended) metrics used in this report:
 
 | Scenario | Server Count | Consumer Count | Message Count | Client Threads | Throughput (msg/s) | ACK p95 (ms) | ACK p99 (ms) | E2E p95 (ms) | E2E p99 (ms) | Conn Failures | Retry Attempts | Peak Queue Ready | Avg Queue Ready | Notes |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| Single-server baseline | 1 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
-| Load-balanced (2 servers) | 2 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
+| Single-server baseline (completed) | 1 | 1 | 500,000 | 32 | 1933.92 | 17 | 31 | 35 | 251 | 0 | 0 | ~0 (mostly zero) | ~0 (mostly zero) | Stable in 1C1S with low ACK/E2E latency and no queue backlog |
+| Load-balanced (2 servers, completed) | 2 | 2 | 500,000 | 32 | 7738.12 | 44 | 240 | 2855 | 3689 | 0 | 0 | 0 | ~0 | High ingress achieved, but RabbitMQ (`t3.small`) became the bottleneck at higher QPS with visible spike behavior |
 | Load-balanced (4 servers) | 4 | 4 | 500,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
 | Stress (4 servers) | 4 | 4 | 1,000,000 | 64 | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` | `<TBD>` |
 
@@ -258,19 +263,71 @@ Additional (recommended) metrics used in this report:
 
 #### A. Single Instance Scenario
 
-- [ ] Client terminal output screenshot (performance summary)
-- [ ] RabbitMQ Overview screenshot (queue depth + message rates)
-- [ ] RabbitMQ Queues screenshot (all room queues with ready/unacked/rates)
-- [ ] EC2 system metrics screenshot(s): CPU/Network/Disk
-- [ ] Memory evidence screenshot (`free -m` or `top`)
+- [x] Client terminal output screenshot (performance summary)
+- [x] RabbitMQ Overview screenshot (queue depth + message rates)
+- [x] RabbitMQ Queues screenshot (all room queues with ready/unacked/rates)
+- [x] EC2 system metrics screenshot(s): CPU/Network/Disk
+- [x] Memory evidence screenshot (`free -m` or `top`)
+
+Single-instance (1C1S) evidence has been collected under `results/pics`:
+
+**Client Output (`metrics-1s1c.png`)**
+
+![1C1S Client Metrics](../../results/pics/1c1s/metrics-1s1c.png)
+
+**RabbitMQ Queues (`rabbitmq-1s1c-32.png`)**
+
+![1C1S RabbitMQ Queues](../../results/pics/1c1s/rabbitmq-1s1c-32.png)
+
+**ALB Monitoring (`alb-1c1s.png`)**
+
+![1C1S ALB Monitoring](../../results/pics/1c1s/alb-1c1s.png)
+
+**Server System Snapshot (`server-1s1c-htop.png`)**
+
+![1C1S Server System Snapshot](../../results/pics/1c1s/server-1s1c-htop.png)
+
+**Consumer System Snapshot (`consumer-1s1c.png`)**
+
+![1C1S Consumer System Snapshot](../../results/pics/1c1s/consumer-1s1c.png)
+
+**RabbitMQ Node Snapshot (`rabbitmq-1s1c-htop.png`)**
+
+![1C1S RabbitMQ Node Snapshot](../../results/pics/1c1s/rabbitmq-1s1c-htop.png)
 
 #### B. 2-Instance Load Balanced Scenario
 
-- [ ] Client terminal output screenshot
-- [ ] ALB CloudWatch screenshot (RequestCount, TargetResponseTime, HealthyHostCount)
-- [ ] RabbitMQ Overview screenshot
-- [ ] RabbitMQ Queues screenshot
-- [ ] EC2 system metrics screenshot(s)
+- [x] Client terminal output screenshot
+- [x] ALB CloudWatch screenshot (RequestCount, TargetResponseTime, HealthyHostCount)
+- [x] RabbitMQ Overview screenshot
+- [x] RabbitMQ Queues screenshot
+- [x] EC2 system metrics screenshot(s)
+
+Load-balanced (2C2S) evidence has been collected under `results/pics/2c2s`:
+
+**Client Output (`metrics-2c2s.png`)**
+
+![2C2S Client Metrics](../../results/pics/2c2s/metrics-2c2s.png)
+
+**ALB Monitoring (`alb-2c2s.png`)**
+
+![2C2S ALB Monitoring](../../results/pics/2c2s/alb-2c2s.png)
+
+**RabbitMQ Console (`rabbitmq-2c2s.png`)**
+
+![2C2S RabbitMQ](../../results/pics/2c2s/rabbitmq-2c2s.png)
+
+**Server System Snapshot (`server-2c2s-htop.png`)**
+
+![2C2S Server System Snapshot](../../results/pics/2c2s/server-2c2s-htop.png)
+
+**Consumer System Snapshot (`consumer-2c2s-htop.png`)**
+
+![2C2S Consumer System Snapshot](../../results/pics/2c2s/consumer-2c2s-htop.png)
+
+**RabbitMQ Node Snapshot (`rabbitmq-2c2s-htop.png`)**
+
+![2C2S RabbitMQ Node Snapshot](../../results/pics/2c2s/rabbitmq-2c2s-htop.png)
 
 #### C. 4-Instance Load Balanced Scenario
 
@@ -298,6 +355,36 @@ Fill one block per test run:
 - `global_max_inflight`: `<TBD>`
 - Client config file: `<TBD>`
 
+Current filled run (1C1S):
+
+- Run ID: `1c1s-32t-500k`
+- Date/Time (PST): `2026-03-11`
+- Git commit: `<TBD>`
+- Server image tag: `ghcr.io/eternity1824/chatflow-server-v2:v5`
+- Consumer image tag: `ghcr.io/eternity1824/chatflow-consumer:v5`
+- `server_count`: `1`
+- `consumer_count`: `1`
+- `consumer_threads`: `80`
+- `consumer_prefetch`: `200`
+- `room_max_inflight`: `16`
+- `global_max_inflight`: `2000`
+- Client config file: `config/client-part2-32-s1-4500.yml`
+
+Current filled run (2C2S):
+
+- Run ID: `2c2s-32t-8000-500k`
+- Date/Time (PST): `2026-03-12`
+- Git commit: `<TBD>`
+- Server image tag: `ghcr.io/eternity1824/chatflow-server-v2:v5`
+- Consumer image tag: `ghcr.io/eternity1824/chatflow-consumer:v5`
+- `server_count`: `2`
+- `consumer_count`: `2`
+- `consumer_threads`: `40`
+- `consumer_prefetch`: `160`
+- `room_max_inflight`: `12`
+- `global_max_inflight`: `1000`
+- Client config file: `config/client-part2-32-s2-8000.yml`
+
 ### 3.5 Queue Profile Assessment
 
 For each run, classify queue profile and explain:
@@ -307,6 +394,22 @@ For each run, classify queue profile and explain:
 - Drain behavior: `<TBD>`
 - Redelivery/duplicate behavior: `<TBD>`
 - Bottleneck hypothesis: `<TBD>`
+
+Current 1C1S assessment:
+
+- Profile type: `Stable plateau` (publish/ack rates close; queue ready near zero)
+- Peak ready depth: `~0` (no meaningful backlog in captured window)
+- Drain behavior: `Producer and consumer rates stay close; queue drains in-window`
+- Redelivery/duplicate behavior: `No major redelivery spike observed in screenshots`
+- Bottleneck hypothesis: `In 1C1S, system is network/ingress limited before queue backlog builds`
+
+Current 2C2S assessment:
+
+- Profile type: `Mostly stable with spike episodes`
+- Peak ready depth: `0` (ready queue stayed near zero in captured window)
+- Drain behavior: `Consumer ACK rate tracks publish closely, but Unacked/total bursts appear under high ingress`
+- Redelivery/duplicate behavior: `No significant redelivery spike shown in RabbitMQ overview screenshot`
+- Bottleneck hypothesis: `RabbitMQ node capacity (t3.small) is the primary bottleneck near 8k QPS target`
 
 ### 3.6 System Utilization Snapshot (Minimal Overhead Approach)
 
@@ -328,3 +431,10 @@ Use the following low-overhead evidence:
 - Queue depth trend as scale increases: `<TBD>`
 - Resource bottleneck shifts (server vs consumer vs rabbit): `<TBD>`
 - Final tuned configuration and rationale: `<TBD>`
+
+Preliminary bottleneck note (2S2C high-QPS probe):
+
+- At targetQps around `8000`, the RabbitMQ node (`t3.small`) becomes the primary bottleneck.
+- Observed behavior: broker CPU approaches saturation, queue/rate curves show periodic spikes, and forwarding cannot keep up with ingress.
+- Interpretation: the small instance class is under-provisioned for this QPS range; burstable credit and runtime pause effects (including GC/scheduler jitter) amplify spike behavior.
+- Recommendation for subsequent 4S4C runs: upgrade RabbitMQ instance size first (e.g., `t3.medium` or larger) before attributing bottlenecks to server/consumer logic.
