@@ -107,6 +107,7 @@ public class ChatClient {
         Thread generatorThread = new Thread(new MessageGenerator(messageQueue, totalMessages, 20));
         generatorThread.start();
 
+        long testStartMs = System.currentTimeMillis();
         metrics.markStart();
 
         logger.info("=== Warmup Phase ===");
@@ -139,6 +140,7 @@ public class ChatClient {
         }
 
         metrics.markEnd();
+        long testEndMs = System.currentTimeMillis();
         metrics.printSummary();
         try {
             metrics.writeThroughputBuckets("results/throughput_10s.csv");
@@ -148,7 +150,19 @@ public class ChatClient {
         } finally {
             metrics.close();
         }
-        
+
+        // Fetch and log metrics report from server
+        MetricsReportClient reportClient = new MetricsReportClient(serverUrl);
+        if (reportClient.isEnabled()) {
+            try {
+                String reportJson = reportClient.fetchReport(testStartMs, testEndMs);
+                logger.info("=== Assignment 3 Metrics Report ===\n{}", reportJson);
+                logReportSummary(reportJson, testStartMs, testEndMs);
+            } catch (Exception e) {
+                logger.warn("Failed to fetch metrics report: {}", e.getMessage());
+            }
+        }
+
         connectionPool.closeAll();
         sharedEventLoopGroup.shutdownGracefully();
     }
@@ -173,6 +187,91 @@ public class ChatClient {
         for (Thread thread : threads) {
             thread.join();
         }
+    }
+
+    /**
+     * Extracts and logs a human-readable summary from the metrics report JSON.
+     * Uses basic string parsing to avoid pulling in a JSON library dependency.
+     */
+    private void logReportSummary(String json, long startMs, long endMs) {
+        try {
+            String lagMs        = extractJsonString(json, "projectionLagMs");
+            String consistent   = extractJsonString(json, "isConsistent");
+            String activeUsers  = extractNestedValue(json, "activeUserCount");
+            String topRooms     = extractTopN(json, "topRooms",  3);
+            String topUsers     = extractTopN(json, "topUsers",  3);
+
+            logger.info("=== Metrics Summary ===");
+            logger.info("  window:          {}ms – {}ms  (duration {}s)",
+                startMs, endMs, (endMs - startMs) / 1000);
+            logger.info("  totalMessages:   {}", totalMessages);
+            logger.info("  reportEndpoint:  {}", serverUrl.replaceFirst("^ws", "http")
+                .replaceFirst("/chat$", "") + "/api/metrics/report");
+            logger.info("  projectionLagMs: {}", lagMs);
+            logger.info("  isConsistent:    {}", consistent);
+            logger.info("  activeUserCount: {}", activeUsers);
+            logger.info("  top3Rooms:       {}", topRooms);
+            logger.info("  top3Users:       {}", topUsers);
+        } catch (Exception e) {
+            logger.debug("Could not parse report summary: {}", e.getMessage());
+        }
+    }
+
+    /** Naive extraction of a scalar value by key from a flat JSON string. */
+    private static String extractJsonString(String json, String key) {
+        String search = "\"" + key + "\"";
+        int idx = json.indexOf(search);
+        if (idx < 0) return "N/A";
+        int colon = json.indexOf(':', idx + search.length());
+        if (colon < 0) return "N/A";
+        // Skip whitespace
+        int start = colon + 1;
+        while (start < json.length() && json.charAt(start) == ' ') start++;
+        // Read until comma, closing brace, or end
+        int end = start;
+        boolean inStr = json.charAt(start) == '"';
+        if (inStr) start++;
+        while (end < json.length()) {
+            char c = json.charAt(end);
+            if (inStr && c == '"') break;
+            if (!inStr && (c == ',' || c == '}' || c == '\n')) break;
+            end++;
+        }
+        return inStr ? json.substring(start, end) : json.substring(start, end).trim();
+    }
+
+    /** Extracts a value by key that may be nested anywhere in the JSON. */
+    private static String extractNestedValue(String json, String key) {
+        return extractJsonString(json, key);
+    }
+
+    /** Extracts the first N id values from an array field named {@code arrayKey}. */
+    private static String extractTopN(String json, String arrayKey, int n) {
+        String marker = "\"" + arrayKey + "\"";
+        int arrIdx = json.indexOf(marker);
+        if (arrIdx < 0) return "N/A";
+        int open = json.indexOf('[', arrIdx);
+        int close = json.indexOf(']', open);
+        if (open < 0 || close < 0) return "N/A";
+        String arr = json.substring(open, close + 1);
+        StringBuilder sb = new StringBuilder("[");
+        int count = 0;
+        int pos = 0;
+        while (count < n && pos < arr.length()) {
+            int idIdx = arr.indexOf("\"id\"", pos);
+            if (idIdx < 0) break;
+            int colon = arr.indexOf(':', idIdx + 4);
+            if (colon < 0) break;
+            int qStart = arr.indexOf('"', colon + 1);
+            int qEnd   = arr.indexOf('"', qStart + 1);
+            if (qStart < 0 || qEnd < 0) break;
+            if (count > 0) sb.append(", ");
+            sb.append(arr, qStart, qEnd + 1);
+            pos = qEnd + 1;
+            count++;
+        }
+        sb.append("]");
+        return count == 0 ? "N/A" : sb.toString();
     }
 
     private int calculateOptimalThreads() {

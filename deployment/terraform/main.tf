@@ -272,27 +272,34 @@ resource "aws_instance" "server" {
   instance_type               = var.server_instance_type
   subnet_id                   = local.subnet_ids[count.index % length(local.subnet_ids)]
   vpc_security_group_ids      = [aws_security_group.server.id]
+  iam_instance_profile        = local.resolved_server_instance_profile_name
   associate_public_ip_address = var.associate_public_ip
   key_name                    = local.key_name_or_null
   user_data_replace_on_change = true
 
   user_data = templatefile("${path.module}/user_data/server.sh.tftpl", {
-    server_id            = "server-${count.index + 1}"
-    chat_port            = var.chat_port
-    grpc_port            = var.server_grpc_port
-    internal_token       = var.chatflow_internal_token
-    rabbit_host          = aws_instance.rabbit.private_ip
-    rabbit_port          = var.rabbit_port
-    rabbit_username      = var.rabbit_username
-    rabbit_password      = var.rabbit_password
-    rabbit_vhost         = var.rabbit_vhost
-    rabbit_exchange      = var.rabbit_exchange
-    room_start           = var.room_start
-    room_end             = var.room_end
-    queue_message_ttl_ms = var.queue_message_ttl_ms
-    queue_max_length     = var.queue_max_length
-    server_jar_url       = var.server_jar_url
-    server_image         = var.server_image
+    server_id                      = "server-${count.index + 1}"
+    chat_port                      = var.chat_port
+    grpc_port                      = var.server_grpc_port
+    internal_token                 = var.chatflow_internal_token
+    rabbit_host                    = aws_instance.rabbit.private_ip
+    rabbit_port                    = var.rabbit_port
+    rabbit_username                = var.rabbit_username
+    rabbit_password                = var.rabbit_password
+    rabbit_vhost                   = var.rabbit_vhost
+    rabbit_exchange                = var.rabbit_exchange
+    room_start                     = var.room_start
+    room_end                       = var.room_end
+    queue_message_ttl_ms           = var.queue_message_ttl_ms
+    queue_max_length               = var.queue_max_length
+    dynamo_region                  = var.enable_persistence ? data.aws_region.current.name : ""
+    table_room_messages            = var.enable_persistence ? aws_dynamodb_table.room_messages[0].name : ""
+    table_user_messages            = var.enable_persistence ? aws_dynamodb_table.user_messages[0].name : ""
+    table_user_rooms               = var.enable_persistence ? aws_dynamodb_table.user_rooms[0].name : ""
+    redis_endpoint                 = var.enable_persistence ? local.redis_endpoint : ""
+    projection_health_threshold_ms = var.server_v3_projection_health_threshold_ms
+    server_jar_url                 = var.server_jar_url
+    server_image                   = var.server_image
   })
 
   root_block_device {
@@ -316,6 +323,7 @@ resource "aws_instance" "consumer" {
   instance_type               = var.consumer_instance_type
   subnet_id                   = local.subnet_ids[count.index % length(local.subnet_ids)]
   vpc_security_group_ids      = [aws_security_group.consumer.id]
+  iam_instance_profile        = local.resolved_consumer_instance_profile_name
   associate_public_ip_address = var.associate_public_ip
   key_name                    = local.key_name_or_null
   user_data_replace_on_change = true
@@ -345,6 +353,15 @@ resource "aws_instance" "consumer" {
     broadcast_targets              = join(",", local.broadcast_targets)
     consumer_instance_index        = count.index
     consumer_instance_count        = var.consumer_count
+    dynamo_region                  = var.enable_persistence ? data.aws_region.current.name : ""
+    dynamo_table_canonical         = var.enable_persistence ? aws_dynamodb_table.messages_by_id[0].name : ""
+    sqs_dlq_url                    = var.enable_persistence ? aws_sqs_queue.consumer_v3_dlq[0].url : ""
+    consumer_batch_size            = var.consumer_v3_batch_size
+    consumer_flush_interval_ms     = var.consumer_v3_flush_interval_ms
+    consumer_semaphore_permits     = var.consumer_v3_semaphore_permits
+    consumer_cb_enabled            = var.consumer_v3_cb_enabled
+    consumer_cb_failure_threshold  = var.consumer_v3_cb_failure_threshold
+    consumer_cb_open_ms            = var.consumer_v3_cb_open_ms
     consumer_jar_url               = var.consumer_jar_url
     consumer_image                 = var.consumer_image
   })

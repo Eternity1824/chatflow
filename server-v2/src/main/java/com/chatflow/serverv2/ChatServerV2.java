@@ -31,6 +31,7 @@ public class ChatServerV2 {
     private final String internalToken;
     private final RabbitMqPublisher publisher;
     private RoomSessionRegistry roomSessionRegistry;
+    private ApiHandler apiHandler;
 
     public ChatServerV2(
             int port,
@@ -68,6 +69,7 @@ public class ChatServerV2 {
                             pipeline.addLast("httpAggregator", new HttpObjectAggregator(65536));
                             pipeline.addLast("chunkedWriter", new ChunkedWriteHandler());
                             pipeline.addLast("roomIdExtractor", new RoomIdExtractorHandler());
+                            pipeline.addLast("apiHandler", apiHandler);
                             pipeline.addLast(
                                     "internalBroadcast",
                                     new InternalBroadcastHandler(roomSessionRegistry, internalToken));
@@ -129,15 +131,20 @@ public class ChatServerV2 {
 
         RabbitMqConfig config = RabbitMqConfig.fromEnvironment();
         RoomSessionRegistry roomSessionRegistry = new RoomSessionRegistry();
-        
+
         InternalBroadcastGrpcService grpcService = new InternalBroadcastGrpcService(roomSessionRegistry, internalToken);
         GrpcServerManager grpcServer = new GrpcServerManager(grpcPort, grpcService);
         grpcServer.start();
         logger.info("gRPC internal broadcast service available on port {}", grpcPort);
 
+        ServerV2PersistenceConfig persistenceConfig = ServerV2PersistenceConfig.fromEnv();
+        logger.info("Persistence config: {}", persistenceConfig);
+        ApiHandler apiHandler = ApiHandler.create(persistenceConfig);
+
         try (RabbitMqPublisher publisher = new RabbitMqPublisher(config)) {
             ChatServerV2 server = new ChatServerV2(port, workerThreads, serverId, internalToken, publisher);
             server.roomSessionRegistry = roomSessionRegistry;
+            server.apiHandler = apiHandler;
             server.start();
         } finally {
             grpcServer.close();

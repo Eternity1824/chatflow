@@ -15,6 +15,8 @@ application {
     mainClass.set("com.chatflow.serverv2.ChatServerV2")
 }
 
+val awsSdkVersion = "2.25.11"
+
 dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -34,6 +36,11 @@ dependencies {
     implementation("org.apache.logging.log4j:log4j-core:2.23.1")
     implementation("org.apache.logging.log4j:log4j-slf4j2-impl:2.23.1")
     implementation("com.lmax:disruptor:3.4.4")
+
+    implementation(platform("software.amazon.awssdk:bom:$awsSdkVersion"))
+    implementation("software.amazon.awssdk:dynamodb")
+    implementation("software.amazon.awssdk:url-connection-client")
+    implementation("io.lettuce:lettuce-core:6.3.2.RELEASE")
 }
 
 tasks.test {

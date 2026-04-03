@@ -1,0 +1,21 @@
+# Assignment 3 — Stress load test (1,000,000 messages)
+# Target: find throughput ceiling; identify first bottleneck.
+# Run: java -jar client-part2/build/libs/client-part2-all.jar --config config/assignment3-stress.yml
+
+jvmOpts: "-Xms1g -Xmx2g"
+client:
+  serverUrl: "ws://<alb-dns-name>/chat"
+  totalMessages: 1000000
+  warmupThreads: 32
+  warmupMessagesPerThread: 1000
+  mainThreads: 64
+  targetQps: 5000
+  connectionsPerRoom: 1
+  handshakeTimeoutSeconds: 20
+  maxConcurrentHandshakes: 32
+  handshakeRetryDelayMs: 10
+  responseWaitSeconds: 900
+  batchSize: 100
+  batchMaxBytes: 65536
+  flushIntervalMs: 2
+  flushSync: false

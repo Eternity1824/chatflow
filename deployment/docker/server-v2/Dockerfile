@@ -1,4 +1,4 @@
-FROM gradle:8.14-jdk17 AS build
+FROM gradle:8.14-jdk21 AS build
 
 WORKDIR /workspace
 
@@ -9,7 +9,7 @@ COPY server-v2 ./server-v2
 
 RUN chmod +x gradlew && ./gradlew --no-daemon :server-v2:shadowJar
 
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 

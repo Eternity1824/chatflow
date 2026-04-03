@@ -36,7 +36,22 @@ rabbit_password         = "guest"
 # Recommended deployment mode: container images.
 rabbit_image   = "rabbitmq:3-management"
 server_image   = "ghcr.io/<user>/chatflow-server-v2:<tag>"
-consumer_image = "ghcr.io/<user>/chatflow-consumer:<tag>"
+consumer_image = "ghcr.io/<user>/chatflow-consumer-v3:<tag>"
+
+# Assignment 3 persistence stack.
+# enable_persistence       = true
+# enable_elasticache       = true
+# If your AWS lab account cannot create IAM roles, reuse the pre-created lab identities instead.
+# existing_server_instance_profile_name   = "LabInstanceProfile"
+# existing_consumer_instance_profile_name = "LabInstanceProfile"
+# existing_lambda_role_arn                = "arn:aws:iam::<account-id>:role/LabRole"
+# lambda_cdc_jar_s3_bucket = "<your-bucket>"
+# lambda_cdc_jar_s3_key    = "chatflow/projection-lambda-all.jar"
+# lambda_cdc_jar_local_path = "../projection-lambda/build/libs/projection-lambda-1.0-SNAPSHOT-all.jar"
+# elasticache_subnet_ids   = ["subnet-xxxx", "subnet-yyyy"]
+# consumer_v3_batch_size   = 1000
+# consumer_v3_flush_interval_ms = 500
+# consumer_v3_semaphore_permits = 64
 
 # Optional jar fallback mode (used only if image is empty).
 # server_jar_url   = "https://<bucket-or-host>/server-v2-all.jar"

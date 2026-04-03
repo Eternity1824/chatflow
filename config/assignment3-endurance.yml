@@ -1,0 +1,31 @@
+# Assignment 3 — Endurance load test (~30 min sustained at 80 % peak)
+#
+# How to size totalMessages:
+#   1. From the stress test, note your mean throughput (msg/s).
+#   2. Compute 80 % target: target = mean * 0.80
+#   3. totalMessages = target * 1800  (30 min)
+#   Example: mean = 4000 msg/s → target = 3200 → totalMessages = 5,760,000
+#
+# Adjust mainThreads and targetQps to match 80 % of your observed peak.
+#
+# Run: java -jar client-part2/build/libs/client-part2-all.jar --config config/assignment3-endurance.yml
+
+jvmOpts: "-Xms1g -Xmx2g"
+client:
+  serverUrl: "ws://<alb-dns-name>/chat"
+  # 80% of the observed stress throughput (~4.78k msg/s), rounded to 3.8k.
+  totalMessages: 6840000
+  warmupThreads: 32
+  warmupMessagesPerThread: 1000
+  mainThreads: 48
+  targetQps: 3800
+  connectionsPerRoom: 1
+  handshakeTimeoutSeconds: 20
+  maxConcurrentHandshakes: 32
+  handshakeRetryDelayMs: 10
+  # 35 min budget — allows for warmup overhead
+  responseWaitSeconds: 2100
+  batchSize: 100
+  batchMaxBytes: 65536
+  flushIntervalMs: 5
+  flushSync: false

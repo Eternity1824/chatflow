@@ -46,3 +46,13 @@ AGENTS.md
 .venv/
 
 results/
+
+# Local test outputs and generated artifacts
+load-tests/results/**
+!load-tests/results/.gitkeep
+docs/report/assignment3-report.html
+docs/report/CS6650 Assignment 3 Report.pdf
+deployment/terraform/tfplan*
+
+# Local IDE state
+.idea/gradle.xml

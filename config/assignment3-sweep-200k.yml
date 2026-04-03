@@ -1,0 +1,20 @@
+# Assignment 3 - Reduced-load sweep config (200 k messages)
+# Used for the 5-run consumer batch/flush parameter sweep.
+
+jvmOpts: "-Xms512m -Xmx1g"
+client:
+  serverUrl: "ws://<alb-dns-name>/chat"
+  totalMessages: 200000
+  warmupThreads: 16
+  warmupMessagesPerThread: 500
+  mainThreads: 32
+  targetQps: 3000
+  connectionsPerRoom: 1
+  handshakeTimeoutSeconds: 20
+  maxConcurrentHandshakes: 32
+  handshakeRetryDelayMs: 10
+  responseWaitSeconds: 600
+  batchSize: 100
+  batchMaxBytes: 65536
+  flushIntervalMs: 5
+  flushSync: false

@@ -4,7 +4,7 @@ set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
-apt-get install -y ca-certificates curl gnupg lsb-release openjdk-17-jre-headless
+apt-get install -y ca-certificates curl gnupg lsb-release openjdk-21-jre-headless
 mkdir -p /etc/chatflow /opt/chatflow /var/log/chatflow
 
 cat >/etc/chatflow/server-v2.env <<'ENVEOF'
@@ -21,6 +21,12 @@ CHATFLOW_ROOM_START=${room_start}
 CHATFLOW_ROOM_END=${room_end}
 CHATFLOW_QUEUE_MESSAGE_TTL_MS=${queue_message_ttl_ms}
 CHATFLOW_QUEUE_MAX_LENGTH=${queue_max_length}
+CHATFLOW_V3_DYNAMO_REGION=${dynamo_region}
+CHATFLOW_V3_DYNAMO_TABLE_ROOM_MESSAGES=${table_room_messages}
+CHATFLOW_V3_DYNAMO_TABLE_USER_MESSAGES=${table_user_messages}
+CHATFLOW_V3_DYNAMO_TABLE_USER_ROOMS=${table_user_rooms}
+CHATFLOW_V3_REDIS_ENDPOINT=${redis_endpoint}
+CHATFLOW_V3_PROJECTION_HEALTH_THRESHOLD_MS=${projection_health_threshold_ms}
 ENVEOF
 
 install_docker() {

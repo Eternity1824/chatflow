@@ -4,7 +4,7 @@ set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
-apt-get install -y ca-certificates curl gnupg lsb-release openjdk-17-jre-headless
+apt-get install -y ca-certificates curl gnupg lsb-release openjdk-21-jre-headless
 mkdir -p /etc/chatflow /opt/chatflow /var/log/chatflow
 
 cat >/etc/chatflow/consumer.env <<'ENVEOF'
@@ -32,6 +32,30 @@ CHATFLOW_CONSUMER_INSTANCE_INDEX=${consumer_instance_index}
 CHATFLOW_CONSUMER_INSTANCE_COUNT=${consumer_instance_count}
 CHATFLOW_INTERNAL_TOKEN=${internal_token}
 CHATFLOW_BROADCAST_TARGETS=${broadcast_targets}
+CHATFLOW_V3_RABBIT_HOST=${rabbit_host}
+CHATFLOW_V3_RABBIT_PORT=${rabbit_port}
+CHATFLOW_V3_RABBIT_USERNAME=${rabbit_username}
+CHATFLOW_V3_RABBIT_PASSWORD=${rabbit_password}
+CHATFLOW_V3_RABBIT_VHOST=${rabbit_vhost}
+CHATFLOW_V3_RABBIT_EXCHANGE=${rabbit_exchange}
+CHATFLOW_V3_RABBIT_PREFETCH=${consumer_prefetch}
+CHATFLOW_V3_ROOM_START=${room_start}
+CHATFLOW_V3_ROOM_END=${room_end}
+CHATFLOW_V3_QUEUE_TTL_MS=${queue_message_ttl_ms}
+CHATFLOW_V3_QUEUE_MAX_LENGTH=${queue_max_length}
+CHATFLOW_V3_DYNAMO_REGION=${dynamo_region}
+CHATFLOW_V3_DYNAMO_TABLE_CANONICAL=${dynamo_table_canonical}
+CHATFLOW_V3_SQS_DLQ_URL=${sqs_dlq_url}
+CHATFLOW_V3_BATCH_SIZE=${consumer_batch_size}
+CHATFLOW_V3_FLUSH_INTERVAL_MS=${consumer_flush_interval_ms}
+CHATFLOW_V3_SEMAPHORE_PERMITS=${consumer_semaphore_permits}
+CHATFLOW_V3_MAX_RETRIES=${consumer_max_retries}
+CHATFLOW_V3_RETRY_BASE_MS=${consumer_retry_backoff_base_ms}
+CHATFLOW_V3_RETRY_MAX_MS=${consumer_retry_backoff_max_ms}
+CHATFLOW_V3_CB_ENABLED=${consumer_cb_enabled}
+CHATFLOW_V3_CB_FAILURE_THRESHOLD=${consumer_cb_failure_threshold}
+CHATFLOW_V3_CB_OPEN_MS=${consumer_cb_open_ms}
+CHATFLOW_V3_METRICS_PORT=${consumer_health_port}
 ENVEOF
 
 install_docker() {
