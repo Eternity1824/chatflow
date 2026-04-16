@@ -22,7 +22,8 @@ import java.util.*;
  *
  * <h3>Time-range queries</h3>
  * For each day touched by [startMs, endMs], we issue one DynamoDB Query with
- * the full-day pk.  Records are filtered to [startMs, endMs] in Java, then
+ * the day-bucket pk and an {@code sk BETWEEN :startSk AND :endSk} condition
+ * so DynamoDB prunes items outside the time range server-side.  Results are
  * merged and sorted by eventTsMs ascending across all days.
  */
 public class QueryService {
@@ -59,10 +60,12 @@ public class QueryService {
     public List<Map<String, Object>> getRoomMessages(String roomId, long startMs, long endMs) {
         if (!enabled) return List.of();
         List<Map<String, Object>> results = new ArrayList<>();
+        int remaining = MAX_RESULTS;
         for (String day : expandDayBuckets(startMs, endMs)) {
             String pk = roomId + "#" + day;
-            results.addAll(queryByPk(tableRoomMessages, pk, startMs, endMs));
-            if (results.size() >= MAX_RESULTS) break;
+            results.addAll(queryByPk(tableRoomMessages, pk, startMs, endMs, remaining));
+            remaining = MAX_RESULTS - results.size();
+            if (remaining <= 0) break;
         }
         results.sort(Comparator.comparingLong(m -> (Long) m.get("eventTs")));
         return results.size() > MAX_RESULTS ? results.subList(0, MAX_RESULTS) : results;
@@ -72,10 +75,12 @@ public class QueryService {
     public List<Map<String, Object>> getUserMessages(String userId, long startMs, long endMs) {
         if (!enabled) return List.of();
         List<Map<String, Object>> results = new ArrayList<>();
+        int remaining = MAX_RESULTS;
         for (String day : expandDayBuckets(startMs, endMs)) {
             String pk = userId + "#" + day;
-            results.addAll(queryByPk(tableUserMessages, pk, startMs, endMs));
-            if (results.size() >= MAX_RESULTS) break;
+            results.addAll(queryByPk(tableUserMessages, pk, startMs, endMs, remaining));
+            remaining = MAX_RESULTS - results.size();
+            if (remaining <= 0) break;
         }
         results.sort(Comparator.comparingLong(m -> (Long) m.get("eventTs")));
         return results.size() > MAX_RESULTS ? results.subList(0, MAX_RESULTS) : results;
@@ -115,27 +120,40 @@ public class QueryService {
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    /** Query one day-bucket's records from table, filter to [startMs, endMs]. */
-    private List<Map<String, Object>> queryByPk(String table, String pk, long startMs, long endMs) {
+    /**
+     * Query one day-bucket's records from table using sk BETWEEN to limit the
+     * time range server-side.  A defensive Java-side eventTsMs check is kept
+     * but is no longer the primary range-pruning mechanism.
+     */
+    private List<Map<String, Object>> queryByPk(String table, String pk,
+                                                 long startMs, long endMs, int limit) {
         List<Map<String, Object>> out = new ArrayList<>();
         try {
             Map<String, AttributeValue> lastKey = null;
+            String startSk = startSortKey(startMs);
+            String endSk   = endSortKey(endMs);
             do {
+                int remaining = limit - out.size();
+                if (remaining <= 0) break;
                 QueryRequest.Builder req = QueryRequest.builder()
                     .tableName(table)
-                    .keyConditionExpression("pk = :pk")
-                    .expressionAttributeValues(Map.of(":pk", s(pk)))
-                    .scanIndexForward(true);
+                    .keyConditionExpression("pk = :pk AND sk BETWEEN :startSk AND :endSk")
+                    .expressionAttributeValues(Map.of(
+                        ":pk",      s(pk),
+                        ":startSk", s(startSk),
+                        ":endSk",   s(endSk)))
+                    .scanIndexForward(true)
+                    .limit(remaining);
                 if (lastKey != null) req.exclusiveStartKey(lastKey);
                 QueryResponse resp = dynamo.query(req.build());
                 for (Map<String, AttributeValue> item : resp.items()) {
                     long ts = num(item, "eventTsMs");
-                    if (ts >= startMs && ts <= endMs) {
+                    if (ts >= startMs && ts <= endMs) { // defensive check
                         out.add(toMessageMap(item));
                     }
                 }
                 lastKey = resp.lastEvaluatedKey().isEmpty() ? null : resp.lastEvaluatedKey();
-            } while (lastKey != null && out.size() < MAX_RESULTS);
+            } while (lastKey != null && out.size() < limit);
         } catch (Exception e) {
             log.warn("queryByPk failed table={} pk={}: {}", table, pk, e.getMessage());
         }
@@ -169,6 +187,14 @@ public class QueryService {
         }
         return days;
     }
+
+    // ── Sort-key boundary helpers (package-private for tests) ──────────────────
+
+    /** Lower-bound sk for a given timestamp (inclusive). */
+    static String startSortKey(long tsMs) { return tsMs + "#"; }
+
+    /** Upper-bound sk for a given timestamp (inclusive of all messageId suffixes). */
+    static String endSortKey(long tsMs) { return tsMs + "#\uFFFF"; }
 
     // ── DynamoDB helpers ──────────────────────────────────────────────────────
 
