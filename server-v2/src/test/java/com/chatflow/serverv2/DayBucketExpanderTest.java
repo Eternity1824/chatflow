@@ -81,6 +81,22 @@ class DayBucketExpanderTest {
         assertEquals(1, buckets.size());
     }
 
+    // ── Sort-key boundary tests ─────────────────────────────────────────────
+
+    @Test
+    void startSortKeyFormat() {
+        assertEquals("1700000000000#", QueryService.startSortKey(1700000000000L));
+    }
+
+    @Test
+    void endSortKeyFormat() {
+        String end = QueryService.endSortKey(1700000000000L);
+        assertTrue(end.startsWith("1700000000000#"), "should start with tsMs#");
+        // Must sort after any realistic messageId suffix (UUID, etc.)
+        assertTrue(end.compareTo("1700000000000#some-message-id") > 0,
+            "endSortKey must be greater than any messageId suffix");
+    }
+
     @Test
     void monthBoundaryIsHandledCorrectly() {
         // 2026-03-31 to 2026-04-01
