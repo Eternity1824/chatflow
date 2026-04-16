@@ -41,6 +41,7 @@ dependencies {
     implementation("software.amazon.awssdk:dynamodb")
     implementation("software.amazon.awssdk:url-connection-client")
     implementation("io.lettuce:lettuce-core:6.3.2.RELEASE")
+    implementation("com.github.ben-manes.caffeine:caffeine:3.1.8")
 }
 
 tasks.test {

@@ -13,6 +13,8 @@
             <option value="$PROJECT_DIR$/client-part2" />
             <option value="$PROJECT_DIR$/common" />
             <option value="$PROJECT_DIR$/consumer" />
+            <option value="$PROJECT_DIR$/consumer-v3" />
+            <option value="$PROJECT_DIR$/projection-lambda" />
             <option value="$PROJECT_DIR$/server" />
             <option value="$PROJECT_DIR$/server-v2" />
           </set>
