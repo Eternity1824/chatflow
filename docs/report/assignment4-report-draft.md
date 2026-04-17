@@ -290,10 +290,10 @@ before/after reporting shape for the two optimizations.
 
 | Scenario | Source JTL | HTML report | Users | Duration | Samples |
 |---|---|---|---:|---:|---:|
-| Baseline | `load-tests/results/baseline-test.jtl` | `load-tests/results/report-sample-mq-baseline/index.html` | 1,000 | 5 min | 100,000 |
-| Optimized | `load-tests/results/optimized-test.jtl` | `load-tests/results/report-sample-mq-optimized/index.html` | 1,000 | 5 min | 100,000 |
-| Stress baseline | `load-tests/results/stress-baseline.jtl` | `load-tests/results/report-sample-mq-stress-baseline/index.html` | 500 | 30 min | 300,000 |
-| Stress optimized | `load-tests/results/stress-optimized.jtl` | `load-tests/results/report-sample-mq-stress-optimized/index.html` | 500 | 30 min | 300,000 |
+| Baseline | `load-tests/results/baseline-test.jtl` | `load-tests/results/report-sample-mq-final-baseline/index.html` | 1,000 | 5 min | 100,000 |
+| Optimized | `load-tests/results/optimized-test.jtl` | `load-tests/results/report-sample-mq-final-optimized/index.html` | 1,000 | 5 min | 100,000 |
+| Stress baseline | `load-tests/results/stress-baseline.jtl` | `load-tests/results/report-sample-mq-final-stress-baseline/index.html` | 500 | 30 min | 300,000 |
+| Stress optimized | `load-tests/results/stress-optimized.jtl` | `load-tests/results/report-sample-mq-final-stress-optimized/index.html` | 500 | 30 min | 300,000 |
 
 The synthetic mix models a read-heavy chat workload:
 
@@ -318,15 +318,15 @@ are not directly comparable to the Assignment 3 write-path p99.
 
 | Scenario | Samples | Avg | p50 | p95 | p99 | Throughput | Error rate |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Baseline | 100,000 | 75.1 ms | 72 ms | 145.0 ms | 173.0 ms | 330.8 req/s | 0.395% |
-| Optimized | 100,000 | 21.4 ms | 17 ms | 47.0 ms | 56.0 ms | 331.1 req/s | 0.190% |
-| Stress baseline | 300,000 | 83.0 ms | 76 ms | 163.0 ms | 199.0 ms | 165.8 req/s | 0.502% |
-| Stress optimized | 300,000 | 24.1 ms | 18 ms | 50.0 ms | 62.0 ms | 165.6 req/s | 0.249% |
+| Baseline | 100,000 | 63.1 ms | 62 ms | 147.0 ms | 214.0 ms | 331.1 req/s | 0.395% |
+| Optimized | 100,000 | 20.0 ms | 17 ms | 54.0 ms | 80.0 ms | 331.1 req/s | 0.190% |
+| Stress baseline | 300,000 | 67.1 ms | 65 ms | 150.0 ms | 223.0 ms | 166.5 req/s | 0.508% |
+| Stress optimized | 300,000 | 21.8 ms | 18 ms | 55.0 ms | 81.0 ms | 166.1 req/s | 0.244% |
 
 In the sample results, throughput remains approximately constant between
 baseline and optimized runs because the workload is arrival-rate limited. The
 main improvement is latency: the optimized sample reduces overall average
-latency by about 71%, p95 latency by about 68%, and p99 latency by about 68%.
+latency by about 68%, p95 latency by about 63%, and p99 latency by about 63%.
 The stress run has lower request rate than the five-minute baseline because the
 assignment stress scenario spreads 300k requests over 30 minutes, but its tail
 latency is slightly higher to model sustained RabbitMQ publish pressure over a
@@ -360,18 +360,18 @@ critical point.
 The write group includes connection setup and `JOIN` samplers, so its p99 is
 higher than message-send latency alone. The `WS TEXT` samplers remain
 low-latency in the sample: baseline p99 is `8 ms`, optimized p99 is `7-8 ms`,
-and stress p99 is `20-21 ms`.
+and stress p99 is `19 ms`.
 
 | Scenario | Path | Samples | Avg | p50 | p95 | p99 | Error rate |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Baseline | Read (`GET`) | 70,025 | 102.4 ms | 95 ms | 192 ms | 288 ms | 0.410% |
-| Optimized | Read (`GET`) | 69,897 | 25.8 ms | 24 ms | 60 ms | 89 ms | 0.183% |
+| Baseline | Read (`GET`) | 70,025 | 85.2 ms | 79 ms | 159 ms | 238 ms | 0.410% |
+| Optimized | Read (`GET`) | 69,897 | 23.7 ms | 23 ms | 55 ms | 81 ms | 0.183% |
 | Baseline | Write (`WS`) | 29,975 | 11.3 ms | 4 ms | 51 ms | 78 ms | 0.360% |
 | Optimized | Write (`WS`) | 30,103 | 11.4 ms | 4 ms | 52 ms | 77 ms | 0.206% |
-| Stress baseline | Read (`GET`) | 209,896 | 110.5 ms | 99 ms | 220 ms | 378 ms | 0.495% |
-| Stress optimized | Read (`GET`) | 209,648 | 26.5 ms | 24 ms | 64 ms | 101 ms | 0.242% |
-| Stress baseline | Write (`WS`) | 90,104 | 18.8 ms | 11 ms | 61 ms | 98 ms | 0.516% |
-| Stress optimized | Write (`WS`) | 90,352 | 18.7 ms | 11 ms | 62 ms | 97 ms | 0.266% |
+| Stress baseline | Read (`GET`) | 210,017 | 88.1 ms | 82 ms | 163 ms | 245 ms | 0.502% |
+| Stress optimized | Read (`GET`) | 209,712 | 23.5 ms | 23 ms | 54 ms | 77 ms | 0.228% |
+| Stress baseline | Write (`WS`) | 89,983 | 18.0 ms | 11 ms | 59 ms | 88 ms | 0.523% |
+| Stress optimized | Write (`WS`) | 90,288 | 18.0 ms | 11 ms | 59 ms | 88 ms | 0.279% |
 
 The implied read request rate is modest: the five-minute sample runs at roughly
 `331 req/s * 70% = 232 read req/s`, while the 30-minute stress sample runs at
@@ -398,10 +398,10 @@ number of records returned from DynamoDB.
 
 | Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Room messages, 5 min window | 98.0 ms | 26.9 ms | 145 ms | 40 ms | 169 ms | 47 ms | 72.5% |
-| User messages, 5 min window | 106.3 ms | 31.8 ms | 157 ms | 47 ms | 182 ms | 55 ms | 70.1% |
-| Room messages, 15 min window | 126.7 ms | 42.8 ms | 187 ms | 64 ms | 221 ms | 74 ms | 66.3% |
-| User messages, 15 min window | 142.0 ms | 47.6 ms | 208 ms | 70 ms | 243 ms | 82 ms | 66.5% |
+| Room messages, 5 min window | 81.1 ms | 24.7 ms | 140 ms | 43 ms | 196 ms | 62 ms | 69.5% |
+| User messages, 5 min window | 88.2 ms | 28.4 ms | 151 ms | 49 ms | 243 ms | 75 ms | 67.8% |
+| Room messages, 15 min window | 104.1 ms | 38.2 ms | 181 ms | 66 ms | 271 ms | 103 ms | 63.3% |
+| User messages, 15 min window | 115.8 ms | 43.0 ms | 198 ms | 74 ms | 305 ms | 111 ms | 62.9% |
 
 The 5-minute windows improve more than the 15-minute windows because narrower
 ranges discard a larger fraction of the original day bucket.
@@ -414,8 +414,8 @@ the optimized path.
 
 | Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Repeated room history reads | 103.9 ms | 3.3 ms | 154 ms | 5 ms | 180 ms | 6 ms | 96.8% |
-| Repeated user history reads | 110.2 ms | 4.4 ms | 164 ms | 7 ms | 190 ms | 8 ms | 96.0% |
+| Repeated room history reads | 85.8 ms | 3.3 ms | 149 ms | 6 ms | 237 ms | 8 ms | 96.2% |
+| Repeated user history reads | 92.2 ms | 4.4 ms | 159 ms | 8 ms | 228 ms | 12 ms | 95.2% |
 
 The JMeter dashboard records request latency and errors, but it does not record
 Caffeine cache hit rate directly. Cache hit/miss counters should be collected
