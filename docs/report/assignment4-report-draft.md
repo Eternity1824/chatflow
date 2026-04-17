@@ -4,8 +4,8 @@
 
 - Course: CS6650
 - Assignment: Assignment 4 - System Optimization
-- Name: `Lihan Zhou`
-- Date: `2026-04-16`
+- Name: `Lihan Zhou, Guoyi Liu, Xuefeng Li, Suiyang Mai`
+- Date: `2026-04-14`
 - Git Repository URL: `https://github.com/Eternity1824/chatflow.git`
 
 ## 1. Architecture Selection
