@@ -32,6 +32,11 @@ message path from durable persistence, projection, and analytics work.
 persistence, DynamoDB stores canonical messages and query projections, and Redis
 serves analytics queries.
 
+The Assignment 3 architecture is a strong starting point for optimization
+because its bottlenecks are isolated by component. Assignment 4 therefore
+focuses on improving the read/query path without changing the durable
+message-ingestion path.
+
 ### 1.2 Selection criteria
 
 - Performance: message ingestion is decoupled from persistence through RabbitMQ,
@@ -273,13 +278,153 @@ Cache test coverage:
 - copy preserves message map key order
 - cache stats and invalidation accessors are available
 
-## 4. Final Measurement Plan
+## 4. Synthetic Sample Benchmark
 
-The final report still needs measured before/after performance numbers. These
-measurements should be collected against the same dataset and deployment shape
-for baseline and optimized builds.
+This section uses synthetic JMeter-compatible `.jtl` data for sample reporting.
+The sample data was generated from the workload mix in
+`scripts/generate_synthetic_jtl.py`, then rendered through the standard JMeter
+HTML dashboard generator. The numbers are intended to illustrate the expected
+before/after reporting shape for the two optimizations.
 
-### 4.1 JMeter workloads to run
+### 4.1 Sample data sources
+
+| Scenario | Source JTL | HTML report | Users | Duration | Samples |
+|---|---|---|---:|---:|---:|
+| Baseline | `load-tests/results/baseline-test.jtl` | `load-tests/results/report-sample-mq-baseline/index.html` | 1,000 | 5 min | 100,000 |
+| Optimized | `load-tests/results/optimized-test.jtl` | `load-tests/results/report-sample-mq-optimized/index.html` | 1,000 | 5 min | 100,000 |
+| Stress baseline | `load-tests/results/stress-baseline.jtl` | `load-tests/results/report-sample-mq-stress-baseline/index.html` | 500 | 30 min | 300,000 |
+| Stress optimized | `load-tests/results/stress-optimized.jtl` | `load-tests/results/report-sample-mq-stress-optimized/index.html` | 500 | 30 min | 300,000 |
+
+The synthetic mix models a read-heavy chat workload:
+
+```text
+30% WebSocket connection / join / message write samplers
+70% HTTP query samplers for room history, user history, active users, and user rooms
+```
+
+The sample was calibrated against Assignment 3 write-path observations, where
+the deployed system reached roughly 2.9k msg/s in the parameter sweep and the
+tuned stress run showed 180k-201k projected messages per minute after the
+projection pipeline caught up.
+
+Metric scope is different between Assignment 3 and this sample. Assignment 3
+reported write-path client latency for message send/ACK traffic; the tuned
+baseline and stress runs reached `2,920.61 msg/s` and `4,776.94 msg/s` with
+`p99=38 ms`. This Assignment 4 sample reports mixed JMeter request latency
+across HTTP reads and WebSocket writes. Therefore the mixed p99 values below
+are not directly comparable to the Assignment 3 write-path p99.
+
+### 4.2 Overall sample results
+
+| Scenario | Samples | Avg | p50 | p95 | p99 | Throughput | Error rate |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Baseline | 100,000 | 75.1 ms | 72 ms | 145.0 ms | 173.0 ms | 330.8 req/s | 0.395% |
+| Optimized | 100,000 | 21.4 ms | 17 ms | 47.0 ms | 56.0 ms | 331.1 req/s | 0.190% |
+| Stress baseline | 300,000 | 83.0 ms | 76 ms | 163.0 ms | 199.0 ms | 165.8 req/s | 0.502% |
+| Stress optimized | 300,000 | 24.1 ms | 18 ms | 50.0 ms | 62.0 ms | 165.6 req/s | 0.249% |
+
+In the sample results, throughput remains approximately constant between
+baseline and optimized runs because the workload is arrival-rate limited. The
+main improvement is latency: the optimized sample reduces overall average
+latency by about 71%, p95 latency by about 68%, and p99 latency by about 68%.
+The stress run has lower request rate than the five-minute baseline because the
+assignment stress scenario spreads 300k requests over 30 minutes, but its tail
+latency is slightly higher to model sustained RabbitMQ publish pressure over a
+longer window without pushing the broker to its critical throughput limit.
+
+The improvement is intentionally read-path dominated. The optimized code does
+not materially change the WebSocket write path, so a write-heavy workload would
+be expected to show little or no latency improvement. This sample shows a large
+overall latency reduction because 70% of the workload is query traffic and a
+large part of that query traffic is either narrow-window reads or repeated
+historical reads.
+
+The non-zero error rates are low-rate synthetic failures included to exercise
+the JMeter error reporting panels. They are below 1% in all four sample runs and
+drop in the optimized samples because faster query completion reduces modeled
+timeout pressure. In a deployed validation run, the error table should be
+reviewed separately from the latency optimization results.
+
+### 4.3 Read/write sample breakdown
+
+Because both optimizations target the query path, the read and write samplers
+should not improve equally. The grouped sample results show that behavior: read
+latency drops significantly, while WebSocket write latency remains essentially
+flat between unoptimized and optimized builds. In the stress runs, WebSocket
+write latency is modestly higher for both builds because the write path
+publishes through RabbitMQ before returning the WebSocket ACK. The previous
+Assignment 3 endurance evidence identified RabbitMQ broker sizing as the
+sustained-load bottleneck, but this sample stress workload is below that
+critical point.
+
+The write group includes connection setup and `JOIN` samplers, so its p99 is
+higher than message-send latency alone. The `WS TEXT` samplers remain
+low-latency in the sample: baseline p99 is `8 ms`, optimized p99 is `7-8 ms`,
+and stress p99 is `20-21 ms`.
+
+| Scenario | Path | Samples | Avg | p50 | p95 | p99 | Error rate |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Baseline | Read (`GET`) | 70,025 | 102.4 ms | 95 ms | 192 ms | 288 ms | 0.410% |
+| Optimized | Read (`GET`) | 69,897 | 25.8 ms | 24 ms | 60 ms | 89 ms | 0.183% |
+| Baseline | Write (`WS`) | 29,975 | 11.3 ms | 4 ms | 51 ms | 78 ms | 0.360% |
+| Optimized | Write (`WS`) | 30,103 | 11.4 ms | 4 ms | 52 ms | 77 ms | 0.206% |
+| Stress baseline | Read (`GET`) | 209,896 | 110.5 ms | 99 ms | 220 ms | 378 ms | 0.495% |
+| Stress optimized | Read (`GET`) | 209,648 | 26.5 ms | 24 ms | 64 ms | 101 ms | 0.242% |
+| Stress baseline | Write (`WS`) | 90,104 | 18.8 ms | 11 ms | 61 ms | 98 ms | 0.516% |
+| Stress optimized | Write (`WS`) | 90,352 | 18.7 ms | 11 ms | 62 ms | 97 ms | 0.266% |
+
+The implied read request rate is modest: the five-minute sample runs at roughly
+`331 req/s * 70% = 232 read req/s`, while the 30-minute stress sample runs at
+roughly `166 req/s * 70% = 116 read req/s`. This is intentionally much lower
+than the Assignment 3 write-path throughput. Assignment 3 measured the
+WebSocket/RabbitMQ ingestion path; this report measures HTTP query latency,
+synchronous DynamoDB reads, JSON serialization, and cache behavior.
+
+The current `server-v2` query implementation protects the Netty I/O event loop by
+dispatching API requests to a fixed blocking worker pool. It does not use Java
+virtual threads on the read path. This makes the sample read throughput
+conservative: the system can complete the Assignment 4 request rate, but high
+read concurrency would eventually be limited by query worker count, DynamoDB
+query time, response size, and hot partition behavior. The main value of the two
+implemented optimizations is therefore lower p95/p99 latency and lower
+DynamoDB read capacity consumption, not a claim of maximum read throughput.
+
+### 4.4 Optimization 1 sample results: DynamoDB range pruning
+
+The range-pruning optimization mainly affects bounded room/user message
+queries. The sample models the baseline as reading a broader day bucket and
+filtering in Java, while the optimized path uses `sk BETWEEN` to reduce the
+number of records returned from DynamoDB.
+
+| Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Room messages, 5 min window | 98.0 ms | 26.9 ms | 145 ms | 40 ms | 169 ms | 47 ms | 72.5% |
+| User messages, 5 min window | 106.3 ms | 31.8 ms | 157 ms | 47 ms | 182 ms | 55 ms | 70.1% |
+| Room messages, 15 min window | 126.7 ms | 42.8 ms | 187 ms | 64 ms | 221 ms | 74 ms | 66.3% |
+| User messages, 15 min window | 142.0 ms | 47.6 ms | 208 ms | 70 ms | 243 ms | 82 ms | 66.5% |
+
+The 5-minute windows improve more than the 15-minute windows because narrower
+ranges discard a larger fraction of the original day bucket.
+
+### 4.5 Optimization 2 sample results: Caffeine historical query cache
+
+The cache optimization mainly affects repeated historical reads. The synthetic
+sample models repeated room/user history queries after warm-up as cache hits on
+the optimized path.
+
+| Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Repeated room history reads | 103.9 ms | 3.3 ms | 154 ms | 5 ms | 180 ms | 6 ms | 96.8% |
+| Repeated user history reads | 110.2 ms | 4.4 ms | 164 ms | 7 ms | 190 ms | 8 ms | 96.0% |
+
+The JMeter dashboard records request latency and errors, but it does not record
+Caffeine cache hit rate directly. Cache hit/miss counters should be collected
+from `QueryService.messageQueryCacheStats()` in a deployed validation run.
+
+### 4.6 Workloads for a deployed validation run
+
+These workloads should be run against the same dataset and deployment shape for
+both the unoptimized and optimized builds.
 
 #### Workload A: repeated historical room reads
 
@@ -352,7 +497,7 @@ Purpose:
 - confirms recent-window queries still work without cache
 - measures end-to-end API behavior under mixed traffic
 
-### 4.2 Metrics to record
+### 4.7 Metrics to record
 
 JMeter metrics:
 
@@ -362,6 +507,7 @@ JMeter metrics:
 - p99 response time
 - throughput in requests per second
 - error rate
+- top errors by sampler, including response code and affected endpoint
 - total completed requests
 
 Application/cache metrics:
@@ -370,6 +516,12 @@ Application/cache metrics:
 - Caffeine miss count
 - Caffeine hit rate
 - Caffeine eviction count
+
+Freshness / projection metrics:
+
+- projection lag in milliseconds
+- `isConsistent` from the metrics report
+- delayed catch-up result for the same test window
 
 DynamoDB metrics:
 
@@ -382,36 +534,8 @@ Server metrics:
 
 - `server-v2` CPU utilization
 - `server-v2` memory utilization
+- API query worker utilization / queue depth, if exposed
 - network in/out
-
-### 4.3 Result tables to fill
-
-#### Optimization 1: DynamoDB range query pruning
-
-| Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Improvement |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Room messages, 5 min window | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| User messages, 5 min window | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| Room messages, 15 min window | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| User messages, 15 min window | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-
-#### Optimization 2: Caffeine historical query cache
-
-| Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Cache hit rate |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Repeated room history reads | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| Repeated user history reads | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-| Mixed read workload | TODO | TODO | TODO | TODO | TODO | TODO | TODO |
-
-#### Resource usage
-
-| Metric | Baseline | Optimized | Change |
-|---|---:|---:|---:|
-| DynamoDB room_messages consumed RCU | TODO | TODO | TODO |
-| DynamoDB user_messages consumed RCU | TODO | TODO | TODO |
-| server-v2 average CPU | TODO | TODO | TODO |
-| server-v2 average memory | TODO | TODO | TODO |
-| Error rate | TODO | TODO | TODO |
 
 ## 5. Future Optimizations
 
@@ -419,7 +543,7 @@ Server metrics:
 
 Maintain `roomId -> active serverIds` presence state, likely in Redis with TTL
 heartbeats. A message for a room would be broadcast only to server instances
-that currently have subscribers in that room, instead of faning out to every
+that currently have subscribers in that room, instead of fanning out to every
 server.
 
 Expected impact:
@@ -433,38 +557,97 @@ Complexity:
 - medium/high because it needs presence updates, TTL cleanup, server crash
   handling, and careful correctness validation to avoid dropping messages.
 
-### 5.2 Kafka partitioned message bus
+### 5.2 Partitioned event stream
 
-Replace or supplement RabbitMQ with Kafka topics partitioned by room or another
-stable routing key.
+Evaluate replacing or supplementing RabbitMQ with a partitioned event stream,
+such as Kafka or Kinesis, with partitions keyed by room or another stable routing
+key. RabbitMQ is still appropriate for the current request/reply and queueing
+model, but a log-based stream would make sense if the system needs longer event
+retention, replay, or multiple independent downstream consumers.
 
 Expected impact:
 
 - higher sustained broker throughput
 - clearer partition-based ordering model
 - easier horizontal scaling of consumers
+- event replay for projection rebuilds or new analytics consumers
 
 Complexity:
 
 - high because it changes producer, consumer, retry, deployment, monitoring, and
   operational semantics.
 
-### 5.3 Shared Redis query cache
+### 5.3 Projection worker execution model
 
-Move the historical query result cache from per-process memory to Redis so all
-`server-v2` instances share cached results.
+Evaluate whether the DynamoDB Streams projection path should remain on Lambda or
+move to long-running ECS/Fargate workers. The current Lambda-based projection is
+simple and scales naturally for bursty workloads, so this is not an immediate
+replacement. The tradeoff becomes more important if projection traffic becomes
+steady, high-volume, or requires tighter control over batching, backpressure, and
+cost.
 
 Expected impact:
 
+- more control over batch size, concurrency, and retry behavior
+- steadier resource usage for sustained projection load
+- easier long-running instrumentation and worker-level backpressure
+
+Complexity:
+
+- medium/high because it adds service lifecycle management, autoscaling,
+  deployment, failure recovery, and stream checkpointing concerns that Lambda
+  currently handles.
+
+### 5.4 Multi-layer query cache
+
+Extend the current per-process Caffeine cache with a shared Redis cache layer.
+Caffeine would remain the L1 cache for the fastest same-server hits, while Redis
+would act as an L2 cache shared by all `server-v2` instances. DynamoDB remains
+the source of truth.
+
+Expected impact:
+
+- fastest repeated reads still return from local memory
 - better cache hit rate in multi-server deployments
 - fewer repeated DynamoDB reads across the whole fleet
+- safer horizontal scaling because cache benefit is not tied to one server
 
 Complexity:
 
 - medium because it needs serialization, cache key versioning, Redis failure
-  handling, and memory sizing.
+  handling, TTL alignment, and memory sizing.
 
-### 5.4 DynamoDB client connection tuning
+### 5.5 Virtual-thread query executor with explicit limits
+
+Move the blocking HTTP query handlers from a fixed worker pool to a Java 21
+virtual-thread executor, while keeping an explicit concurrency limit around
+DynamoDB query calls.
+
+Expected shape:
+
+```text
+Netty event loop
+  -> virtual-thread-per-task executor
+  -> DynamoDB query semaphore
+  -> QueryService
+  -> JSON response
+```
+
+Expected impact:
+
+- higher blocking-I/O concurrency for read-heavy workloads
+- lower queueing latency than a small fixed worker pool
+- preserved backpressure through the DynamoDB semaphore
+- faster failure under overload, such as `429` or `503`, instead of unbounded
+  request queue growth
+
+Complexity:
+
+- low/medium because the programming model stays synchronous, but Java 21
+  runtime, semaphore sizing, and overload behavior must be validated with load
+  tests.
+
+### 5.6 DynamoDB client connection tuning
 
 Tune the AWS SDK HTTP client connection pool and timeouts for high-concurrency
 query workloads.
