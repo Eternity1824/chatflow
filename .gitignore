@@ -58,3 +58,6 @@ deployment/terraform/tfplan*
 .idea/gradle.xml
 
 result/assignment4
+
+# JMeter logs
+*.log
