@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="ChatFlow Eternity Assignment 4 Mixed Workload" enabled="true">
+      <stringProp name="TestPlan.comments">JMeter plan for Eternity1824/chatflow server-v2. Uses WebSocket on /chat?roomId=... for JOIN and TEXT message traffic.</stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments" guiclass="ArgumentsPanel" testclass="Arguments" testname="User Defined Variables" enabled="true">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="host" elementType="Argument">
+            <stringProp name="Argument.name">host</stringProp>
+            <stringProp name="Argument.value">${__P(host,localhost)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="port" elementType="Argument">
+            <stringProp name="Argument.name">port</stringProp>
+            <stringProp name="Argument.value">${__P(port,8080)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="threads" elementType="Argument">
+            <stringProp name="Argument.name">threads</stringProp>
+            <stringProp name="Argument.value">${__P(threads,1000)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ramp_up" elementType="Argument">
+            <stringProp name="Argument.name">ramp_up</stringProp>
+            <stringProp name="Argument.value">${__P(ramp_up,60)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="duration" elementType="Argument">
+            <stringProp name="Argument.name">duration</stringProp>
+            <stringProp name="Argument.value">${__P(duration,300)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="loop_forever" elementType="Argument">
+            <stringProp name="Argument.name">loop_forever</stringProp>
+            <stringProp name="Argument.value">${__P(loop_forever,-1)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="message_prefix" elementType="Argument">
+            <stringProp name="Argument.name">message_prefix</stringProp>
+            <stringProp name="Argument.value">${__P(message_prefix,assignment4)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="ws_timeout_ms" elementType="Argument">
+            <stringProp name="Argument.name">ws_timeout_ms</stringProp>
+            <stringProp name="Argument.value">${__P(ws_timeout_ms,10000)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="constant_timer_ms" elementType="Argument">
+            <stringProp name="Argument.name">constant_timer_ms</stringProp>
+            <stringProp name="Argument.value">${__P(constant_timer_ms,25)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="random_timer_ms" elementType="Argument">
+            <stringProp name="Argument.name">random_timer_ms</stringProp>
+            <stringProp name="Argument.value">${__P(random_timer_ms,50)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+          <elementProp name="users_csv" elementType="Argument">
+            <stringProp name="Argument.name">users_csv</stringProp>
+            <stringProp name="Argument.value">${__P(users_csv,load-tests/jmeter/chatflow-users.csv)}</stringProp>
+            <stringProp name="Argument.metadata">=</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+      <stringProp name="TestPlan.user_define_classpath"></stringProp>
+    </TestPlan>
+    <hashTree>
+      <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="ChatFlow User Data" enabled="true">
+        <stringProp name="delimiter">,</stringProp>
+        <stringProp name="fileEncoding"></stringProp>
+        <stringProp name="filename">${users_csv}</stringProp>
+        <boolProp name="ignoreFirstLine">true</boolProp>
+        <boolProp name="quotedData">false</boolProp>
+        <boolProp name="recycle">true</boolProp>
+        <stringProp name="shareMode">shareMode.all</stringProp>
+        <boolProp name="stopThread">false</boolProp>
+        <stringProp name="variableNames">room_id,user_id,username</stringProp>
+      </CSVDataSet>
+      <hashTree/>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="Assignment 4 Mixed Thread Group" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController" guiclass="LoopControlPanel" testclass="LoopController" testname="Loop Controller" enabled="true">
+          <boolProp name="LoopController.continue_forever">true</boolProp>
+          <stringProp name="LoopController.loops">${loop_forever}</stringProp>
+        </elementProp>
+        <stringProp name="ThreadGroup.num_threads">${threads}</stringProp>
+        <stringProp name="ThreadGroup.ramp_time">${ramp_up}</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <stringProp name="ThreadGroup.duration">${duration}</stringProp>
+        <stringProp name="ThreadGroup.delay"></stringProp>
+      </ThreadGroup>
+      <hashTree>
+        <OnceOnlyController guiclass="OnceOnlyControllerGui" testclass="OnceOnlyController" testname="Open And Join Once" enabled="true"/>
+        <hashTree>
+          <eu.luminis.jmeter.wssampler.OpenWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.OpenWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.OpenWebSocketSampler" testname="WebSocket Open Connection" enabled="true">
+            <stringProp name="server">${host}</stringProp>
+            <stringProp name="port">${port}</stringProp>
+            <stringProp name="path">/chat?roomId=${room_id}</stringProp>
+            <stringProp name="connectionTimeout">${ws_timeout_ms}</stringProp>
+            <stringProp name="readTimeout">${ws_timeout_ms}</stringProp>
+          </eu.luminis.jmeter.wssampler.OpenWebSocketSampler>
+          <hashTree/>
+          <eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler" testname="WS JOIN" enabled="true">
+            <boolProp name="createNewConnection">false</boolProp>
+            <stringProp name="server">${host}</stringProp>
+            <stringProp name="port">${port}</stringProp>
+            <stringProp name="path">/chat?roomId=${room_id}</stringProp>
+            <stringProp name="connectionTimeout">${ws_timeout_ms}</stringProp>
+            <stringProp name="readTimeout">${ws_timeout_ms}</stringProp>
+            <stringProp name="requestData">{&quot;userId&quot;:&quot;${user_id}&quot;,&quot;username&quot;:&quot;${username}&quot;,&quot;message&quot;:&quot;${message_prefix}-join-${__threadNum}&quot;,&quot;timestamp&quot;:&quot;${__time(yyyy-MM-dd'T'HH:mm:ss.SSSXXX,)}&quot;,&quot;messageType&quot;:&quot;JOIN&quot;}</stringProp>
+            <boolProp name="binaryPayload">false</boolProp>
+          </eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler>
+          <hashTree>
+            <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="JOIN Ack Assertion" enabled="true">
+              <collectionProp name="Asserion.test_strings">
+                <stringProp name="1">&quot;responseType&quot;:&quot;ACK&quot;</stringProp>
+              </collectionProp>
+              <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+              <boolProp name="Assertion.assume_success">false</boolProp>
+              <intProp name="Assertion.test_type">16</intProp>
+            </ResponseAssertion>
+            <hashTree/>
+          </hashTree>
+        </hashTree>
+        <UniformRandomTimer guiclass="UniformRandomTimerGui" testclass="UniformRandomTimer" testname="Think Time" enabled="true">
+          <stringProp name="ConstantTimer.delay">${constant_timer_ms}</stringProp>
+          <stringProp name="RandomTimer.range">${random_timer_ms}</stringProp>
+        </UniformRandomTimer>
+        <hashTree/>
+        <eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler" testname="WS TEXT 1" enabled="true">
+          <boolProp name="createNewConnection">false</boolProp>
+          <stringProp name="server">${host}</stringProp>
+          <stringProp name="port">${port}</stringProp>
+          <stringProp name="path">/chat?roomId=${room_id}</stringProp>
+          <stringProp name="connectionTimeout">${ws_timeout_ms}</stringProp>
+          <stringProp name="readTimeout">${ws_timeout_ms}</stringProp>
+          <stringProp name="requestData">{&quot;userId&quot;:&quot;${user_id}&quot;,&quot;username&quot;:&quot;${username}&quot;,&quot;message&quot;:&quot;${message_prefix}-text1-${__threadNum}-${__counter(FALSE,)}&quot;,&quot;timestamp&quot;:&quot;${__time(yyyy-MM-dd'T'HH:mm:ss.SSSXXX,)}&quot;,&quot;messageType&quot;:&quot;TEXT&quot;}</stringProp>
+          <boolProp name="binaryPayload">false</boolProp>
+        </eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="TEXT Ack Assertion 1" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">&quot;responseType&quot;:&quot;ACK&quot;</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+        <eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler" testname="WS TEXT 2" enabled="true">
+          <boolProp name="createNewConnection">false</boolProp>
+          <stringProp name="server">${host}</stringProp>
+          <stringProp name="port">${port}</stringProp>
+          <stringProp name="path">/chat?roomId=${room_id}</stringProp>
+          <stringProp name="connectionTimeout">${ws_timeout_ms}</stringProp>
+          <stringProp name="readTimeout">${ws_timeout_ms}</stringProp>
+          <stringProp name="requestData">{&quot;userId&quot;:&quot;${user_id}&quot;,&quot;username&quot;:&quot;${username}&quot;,&quot;message&quot;:&quot;${message_prefix}-text2-${__threadNum}-${__counter(FALSE,)}&quot;,&quot;timestamp&quot;:&quot;${__time(yyyy-MM-dd'T'HH:mm:ss.SSSXXX,)}&quot;,&quot;messageType&quot;:&quot;TEXT&quot;}</stringProp>
+          <boolProp name="binaryPayload">false</boolProp>
+        </eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="TEXT Ack Assertion 2" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">&quot;responseType&quot;:&quot;ACK&quot;</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+        <eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler guiclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSamplerGui" testclass="eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler" testname="WS TEXT 3" enabled="true">
+          <boolProp name="createNewConnection">false</boolProp>
+          <stringProp name="server">${host}</stringProp>
+          <stringProp name="port">${port}</stringProp>
+          <stringProp name="path">/chat?roomId=${room_id}</stringProp>
+          <stringProp name="connectionTimeout">${ws_timeout_ms}</stringProp>
+          <stringProp name="readTimeout">${ws_timeout_ms}</stringProp>
+          <stringProp name="requestData">{&quot;userId&quot;:&quot;${user_id}&quot;,&quot;username&quot;:&quot;${username}&quot;,&quot;message&quot;:&quot;${message_prefix}-text3-${__threadNum}-${__counter(FALSE,)}&quot;,&quot;timestamp&quot;:&quot;${__time(yyyy-MM-dd'T'HH:mm:ss.SSSXXX,)}&quot;,&quot;messageType&quot;:&quot;TEXT&quot;}</stringProp>
+          <boolProp name="binaryPayload">false</boolProp>
+        </eu.luminis.jmeter.wssampler.RequestResponseWebSocketSampler>
+        <hashTree>
+          <ResponseAssertion guiclass="AssertionGui" testclass="ResponseAssertion" testname="TEXT Ack Assertion 3" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp name="1">&quot;responseType&quot;:&quot;ACK&quot;</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_data</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">16</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>

@@ -56,3 +56,5 @@ deployment/terraform/tfplan*
 
 # Local IDE state
 .idea/gradle.xml
+
+result/assignment4
