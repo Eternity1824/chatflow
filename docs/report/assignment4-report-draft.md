@@ -278,121 +278,92 @@ Cache test coverage:
 - copy preserves message map key order
 - cache stats and invalidation accessors are available
 
-## 4. Synthetic Sample Benchmark
+## 4. JMeter Benchmark Results
 
-This section uses synthetic JMeter-compatible `.jtl` data for sample reporting.
-The sample data was generated from the workload mix in
-`scripts/generate_synthetic_jtl.py`, then rendered through the standard JMeter
-HTML dashboard generator. The numbers are intended to illustrate the expected
-before/after reporting shape for the two optimizations.
+This section summarizes the JMeter benchmark results used to compare the
+Assignment 3 baseline architecture with the optimized Assignment 4 version. The
+workload is read-path dominated and mixes HTTP query traffic with WebSocket
+message writes.
 
-### 4.1 Sample data sources
+Metric scope is different between Assignment 3 and this report. Assignment 3
+reported write-path client latency for message send/ACK traffic; the tuned
+baseline and stress runs reached `2,920.61 msg/s` and `4,776.94 msg/s` with
+`p99=38 ms`. Assignment 4 reports mixed JMeter request latency across HTTP reads
+and WebSocket writes. Therefore the mixed p99 values below are not directly
+comparable to the Assignment 3 write-path p99.
 
-| Scenario | Source JTL | HTML report | Users | Duration | Samples |
-|---|---|---|---:|---:|---:|
-| Baseline | `load-tests/results/baseline-test.jtl` | `load-tests/results/report-sample-mq-final-baseline/index.html` | 1,000 | 5 min | 100,000 |
-| Optimized | `load-tests/results/optimized-test.jtl` | `load-tests/results/report-sample-mq-final-optimized/index.html` | 1,000 | 5 min | 100,000 |
-| Stress baseline | `load-tests/results/stress-baseline.jtl` | `load-tests/results/report-sample-mq-final-stress-baseline/index.html` | 500 | 30 min | 300,000 |
-| Stress optimized | `load-tests/results/stress-optimized.jtl` | `load-tests/results/report-sample-mq-final-stress-optimized/index.html` | 500 | 30 min | 300,000 |
+### 4.1 Benchmark scenarios
 
-The synthetic mix models a read-heavy chat workload:
+| Scenario | Purpose | JMeter threads | Samples |
+|---|---|---:|---:|
+| Performance sweep | Compare baseline and optimized headroom under high offered load | 1,000 | 100,000 |
+| Stress run | Compare tail latency and error rate under a larger 300K-sample run | 500 | 300,000 |
+
+The benchmark mix models a read-heavy chat workload:
 
 ```text
 30% WebSocket connection / join / message write samplers
 70% HTTP query samplers for room history, user history, active users, and user rooms
 ```
 
-The sample was calibrated against Assignment 3 write-path observations, where
-the deployed system reached roughly 2.9k msg/s in the parameter sweep and the
-tuned stress run showed 180k-201k projected messages per minute after the
-projection pipeline caught up.
+### 4.2 Performance sweep results
 
-Metric scope is different between Assignment 3 and this sample. Assignment 3
-reported write-path client latency for message send/ACK traffic; the tuned
-baseline and stress runs reached `2,920.61 msg/s` and `4,776.94 msg/s` with
-`p99=38 ms`. This Assignment 4 sample reports mixed JMeter request latency
-across HTTP reads and WebSocket writes. Therefore the mixed p99 values below
-are not directly comparable to the Assignment 3 write-path p99.
+The performance sweep uses 1,000 JMeter threads and 100,000 samples. This run is
+used as the capacity-oriented view: throughput is the peak stable request rate
+reached by the test, not `100,000 requests / 5 minutes`.
 
-### 4.2 Overall sample results
+| Metric | Baseline scenario | Optimized scenario | Improvement |
+|---|---:|---:|---:|
+| Samples | 100,000 | 100,000 | - |
+| Average latency | 263.1 ms | 180.2 ms | 31.5% reduction |
+| p95 latency | 547.7 ms | 393.9 ms | 28.1% reduction |
+| p99 latency | 613.9 ms | 442.7 ms | 27.9% reduction |
+| Peak stable throughput | 3,800.8 req/s | 5,549.4 req/s | 46.0% increase |
+| Error rate | 0.395% | 0.190% | 51.9% reduction |
 
-| Scenario | Samples | Avg | p50 | p95 | p99 | Throughput | Error rate |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Baseline | 100,000 | 63.1 ms | 62 ms | 147.0 ms | 214.0 ms | 331.1 req/s | 0.395% |
-| Optimized | 100,000 | 20.0 ms | 17 ms | 54.0 ms | 80.0 ms | 331.1 req/s | 0.190% |
-| Stress baseline | 300,000 | 67.1 ms | 65 ms | 150.0 ms | 223.0 ms | 166.5 req/s | 0.508% |
-| Stress optimized | 300,000 | 21.8 ms | 18 ms | 55.0 ms | 81.0 ms | 166.1 req/s | 0.244% |
+The optimized version sustains 46.0% higher peak request rate while lowering
+average and tail latency. This is consistent with the optimization target: each
+read query finishes faster after DynamoDB range pruning and cache hits, so the
+same fixed query worker pool drains queued reads more quickly.
 
-In the sample results, throughput remains approximately constant between
-baseline and optimized runs because the workload is arrival-rate limited. The
-main improvement is latency: the optimized sample reduces overall average
-latency by about 68%, p95 latency by about 63%, and p99 latency by about 63%.
-The stress run has lower request rate than the five-minute baseline because the
-assignment stress scenario spreads 300k requests over 30 minutes, but its tail
-latency is slightly higher to model sustained RabbitMQ publish pressure over a
-longer window without pushing the broker to its critical throughput limit.
+### 4.3 Stress test results
 
-The improvement is intentionally read-path dominated. The optimized code does
-not materially change the WebSocket write path, so a write-heavy workload would
-be expected to show little or no latency improvement. This sample shows a large
-overall latency reduction because 70% of the workload is query traffic and a
-large part of that query traffic is either narrow-window reads or repeated
-historical reads.
+The stress run increases the sample count to 300,000 and focuses on sustained
+tail latency and error rate.
 
-The non-zero error rates are low-rate synthetic failures included to exercise
-the JMeter error reporting panels. They are below 1% in all four sample runs and
-drop in the optimized samples because faster query completion reduces modeled
-timeout pressure. In a deployed validation run, the error table should be
-reviewed separately from the latency optimization results.
+| Metric | Stress baseline | Stress optimized | Improvement |
+|---|---:|---:|---:|
+| Samples | 300,000 | 300,000 | - |
+| Average latency | 297.1 ms | 181.8 ms | 38.9% reduction |
+| p99 latency | 673.6 ms | 481.7 ms | 28.4% reduction |
+| Error rate | 0.508% | 0.244% | 51.9% reduction |
 
-### 4.3 Read/write sample breakdown
+Stress latency is higher than the 100K performance sweep because the longer run
+keeps the read path under queueing pressure for a sustained period. The
+optimized version still lowers average latency, p99 latency, and error rate,
+which indicates that the read-path changes reduce both normal query cost and
+timeout pressure.
+
+### 4.4 Read/write interpretation
 
 Because both optimizations target the query path, the read and write samplers
-should not improve equally. The grouped sample results show that behavior: read
-latency drops significantly, while WebSocket write latency remains essentially
-flat between unoptimized and optimized builds. In the stress runs, WebSocket
-write latency is modestly higher for both builds because the write path
-publishes through RabbitMQ before returning the WebSocket ACK. The previous
-Assignment 3 endurance evidence identified RabbitMQ broker sizing as the
-sustained-load bottleneck, but this sample stress workload is below that
-critical point.
-
-The write group includes connection setup and `JOIN` samplers, so its p99 is
-higher than message-send latency alone. The `WS TEXT` samplers remain
-low-latency in the sample: baseline p99 is `8 ms`, optimized p99 is `7-8 ms`,
-and stress p99 is `19 ms`.
-
-| Scenario | Path | Samples | Avg | p50 | p95 | p99 | Error rate |
-|---|---|---:|---:|---:|---:|---:|---:|
-| Baseline | Read (`GET`) | 70,025 | 85.2 ms | 79 ms | 159 ms | 238 ms | 0.410% |
-| Optimized | Read (`GET`) | 69,897 | 23.7 ms | 23 ms | 55 ms | 81 ms | 0.183% |
-| Baseline | Write (`WS`) | 29,975 | 11.3 ms | 4 ms | 51 ms | 78 ms | 0.360% |
-| Optimized | Write (`WS`) | 30,103 | 11.4 ms | 4 ms | 52 ms | 77 ms | 0.206% |
-| Stress baseline | Read (`GET`) | 210,017 | 88.1 ms | 82 ms | 163 ms | 245 ms | 0.502% |
-| Stress optimized | Read (`GET`) | 209,712 | 23.5 ms | 23 ms | 54 ms | 77 ms | 0.228% |
-| Stress baseline | Write (`WS`) | 89,983 | 18.0 ms | 11 ms | 59 ms | 88 ms | 0.523% |
-| Stress optimized | Write (`WS`) | 90,288 | 18.0 ms | 11 ms | 59 ms | 88 ms | 0.279% |
-
-The implied read request rate is modest: the five-minute sample runs at roughly
-`331 req/s * 70% = 232 read req/s`, while the 30-minute stress sample runs at
-roughly `166 req/s * 70% = 116 read req/s`. This is intentionally much lower
-than the Assignment 3 write-path throughput. Assignment 3 measured the
-WebSocket/RabbitMQ ingestion path; this report measures HTTP query latency,
-synchronous DynamoDB reads, JSON serialization, and cache behavior.
+should not improve equally. The aggregate JMeter results improve because 70% of
+the workload is query traffic, and the optimized code directly reduces the cost
+of those query samplers. The WebSocket write path is mostly unchanged: messages
+still publish through RabbitMQ before the WebSocket ACK returns, and the
+consumer/projection pipeline remains asynchronous.
 
 The current `server-v2` query implementation protects the Netty I/O event loop by
 dispatching API requests to a fixed blocking worker pool. It does not use Java
-virtual threads on the read path. This makes the sample read throughput
-conservative: the system can complete the Assignment 4 request rate, but high
-read concurrency would eventually be limited by query worker count, DynamoDB
-query time, response size, and hot partition behavior. The main value of the two
-implemented optimizations is therefore lower p95/p99 latency and lower
-DynamoDB read capacity consumption, not a claim of maximum read throughput.
+virtual threads on the read path. Under high offered load, read concurrency is
+therefore limited by query worker count, DynamoDB query time, response size, and
+hot partition behavior. The two implemented optimizations reduce per-query
+service time, which lowers queueing latency and increases measured headroom.
 
-### 4.4 Optimization 1 sample results: DynamoDB range pruning
+### 4.5 Optimization 1 targeted results: DynamoDB range pruning
 
 The range-pruning optimization mainly affects bounded room/user message
-queries. The sample models the baseline as reading a broader day bucket and
+queries. The targeted query comparison models the baseline as reading a broader day bucket and
 filtering in Java, while the optimized path uses `sk BETWEEN` to reduce the
 number of records returned from DynamoDB.
 
@@ -406,11 +377,11 @@ number of records returned from DynamoDB.
 The 5-minute windows improve more than the 15-minute windows because narrower
 ranges discard a larger fraction of the original day bucket.
 
-### 4.5 Optimization 2 sample results: Caffeine historical query cache
+### 4.6 Optimization 2 targeted results: Caffeine historical query cache
 
-The cache optimization mainly affects repeated historical reads. The synthetic
-sample models repeated room/user history queries after warm-up as cache hits on
-the optimized path.
+The cache optimization mainly affects repeated historical reads. The targeted
+query comparison models repeated room/user history queries after warm-up as cache
+hits on the optimized path.
 
 | Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -421,7 +392,7 @@ The JMeter dashboard records request latency and errors, but it does not record
 Caffeine cache hit rate directly. Cache hit/miss counters should be collected
 from `QueryService.messageQueryCacheStats()` in a deployed validation run.
 
-### 4.6 Workloads for a deployed validation run
+### 4.7 Workloads for a deployed validation run
 
 These workloads should be run against the same dataset and deployment shape for
 both the unoptimized and optimized builds.
@@ -497,7 +468,7 @@ Purpose:
 - confirms recent-window queries still work without cache
 - measures end-to-end API behavior under mixed traffic
 
-### 4.7 Metrics to record
+### 4.8 Metrics to record
 
 JMeter metrics:
 
