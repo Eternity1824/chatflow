@@ -49,16 +49,6 @@ results/
 
 # Local test outputs and generated artifacts
 load-tests/results/**
-!load-tests/results/.gitkeep
-!load-tests/results/
-!load-tests/results/report-baseline/
-!load-tests/results/report-baseline/**
-!load-tests/results/report-optimized/
-!load-tests/results/report-optimized/**
-!load-tests/results/report-stress-baseline/
-!load-tests/results/report-stress-baseline/**
-!load-tests/results/report-stress-optimized/
-!load-tests/results/report-stress-optimized/**
 docs/report/assignment3-report.html
 docs/report/CS6650 Assignment 3 Report.pdf
 deployment/terraform/tfplan*
