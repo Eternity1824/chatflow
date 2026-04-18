@@ -322,9 +322,10 @@ reached by the test, not `100,000 requests / 5 minutes`.
 | Error rate | 0.395% | 0.190% | 51.9% reduction |
 
 The optimized version sustains 46.0% higher peak request rate while lowering
-average and tail latency. This is consistent with the optimization target: each
-read query finishes faster after DynamoDB range pruning and cache hits, so the
-same fixed query worker pool drains queued reads more quickly.
+average and tail latency. This is consistent with the optimization target: the
+read path performs less unnecessary DynamoDB work, and repeated historical reads
+can be served from the local cache when they are eligible. As a result, the same
+fixed query worker pool drains queued reads more quickly.
 
 ### 4.3 Stress test results
 
@@ -360,39 +361,7 @@ therefore limited by query worker count, DynamoDB query time, response size, and
 hot partition behavior. The two implemented optimizations reduce per-query
 service time, which lowers queueing latency and increases measured headroom.
 
-### 4.5 Optimization 1 targeted results: DynamoDB range pruning
-
-The range-pruning optimization mainly affects bounded room/user message
-queries. The targeted query comparison models the baseline as reading a broader day bucket and
-filtering in Java, while the optimized path uses `sk BETWEEN` to reduce the
-number of records returned from DynamoDB.
-
-| Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Room messages, 5 min window | 81.1 ms | 24.7 ms | 140 ms | 43 ms | 196 ms | 62 ms | 69.5% |
-| User messages, 5 min window | 88.2 ms | 28.4 ms | 151 ms | 49 ms | 243 ms | 75 ms | 67.8% |
-| Room messages, 15 min window | 104.1 ms | 38.2 ms | 181 ms | 66 ms | 271 ms | 103 ms | 63.3% |
-| User messages, 15 min window | 115.8 ms | 43.0 ms | 198 ms | 74 ms | 305 ms | 111 ms | 62.9% |
-
-The 5-minute windows improve more than the 15-minute windows because narrower
-ranges discard a larger fraction of the original day bucket.
-
-### 4.6 Optimization 2 targeted results: Caffeine historical query cache
-
-The cache optimization mainly affects repeated historical reads. The targeted
-query comparison models repeated room/user history queries after warm-up as cache
-hits on the optimized path.
-
-| Scenario | Baseline avg | Optimized avg | Baseline p95 | Optimized p95 | Baseline p99 | Optimized p99 | Avg improvement |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Repeated room history reads | 85.8 ms | 3.3 ms | 149 ms | 6 ms | 237 ms | 8 ms | 96.2% |
-| Repeated user history reads | 92.2 ms | 4.4 ms | 159 ms | 8 ms | 228 ms | 12 ms | 95.2% |
-
-The JMeter dashboard records request latency and errors, but it does not record
-Caffeine cache hit rate directly. Cache hit/miss counters should be collected
-from `QueryService.messageQueryCacheStats()` in a deployed validation run.
-
-### 4.7 Workloads for a deployed validation run
+### 4.5 Workloads for a deployed validation run
 
 These workloads should be run against the same dataset and deployment shape for
 both the unoptimized and optimized builds.
@@ -468,7 +437,7 @@ Purpose:
 - confirms recent-window queries still work without cache
 - measures end-to-end API behavior under mixed traffic
 
-### 4.8 Metrics to record
+### 4.6 Metrics to record
 
 JMeter metrics:
 
