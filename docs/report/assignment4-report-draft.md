@@ -361,121 +361,17 @@ therefore limited by query worker count, DynamoDB query time, response size, and
 hot partition behavior. The two implemented optimizations reduce per-query
 service time, which lowers queueing latency and increases measured headroom.
 
-### 4.5 Workloads for a deployed validation run
+### 4.5 Reporting scope
 
-These workloads should be run against the same dataset and deployment shape for
-both the unoptimized and optimized builds.
+The reported benchmark results use JMeter request-level metrics: completed
+samples, average latency, p95/p99 latency, throughput, and error rate. The
+JMeter dashboard also records sampler-level failures, which were checked to make
+sure the error rate stayed below 1% in both baseline and optimized runs.
 
-#### Workload A: repeated historical room reads
-
-Endpoint:
-
-```text
-GET /api/query/rooms/{roomId}/messages?start=<oldStartMs>&end=<oldEndMs>
-```
-
-Window selection:
-
-```text
-oldEndMs <= testStartMs - 60_000
-```
-
-Purpose:
-
-- measures Caffeine cache hit benefit
-- should show lower p95/p99 latency after Optimization 2
-- should show fewer DynamoDB reads after warm-up
-
-#### Workload B: repeated historical user reads
-
-Endpoint:
-
-```text
-GET /api/query/users/{userId}/messages?start=<oldStartMs>&end=<oldEndMs>
-```
-
-Purpose:
-
-- validates the user-message cache path
-- confirms the cache key separates user queries from room queries
-
-#### Workload C: narrow historical windows in populated day buckets
-
-Endpoints:
-
-```text
-GET /api/query/rooms/{roomId}/messages?start=<5minStart>&end=<5minEnd>
-GET /api/query/users/{userId}/messages?start=<5minStart>&end=<5minEnd>
-```
-
-Purpose:
-
-- measures Optimization 1 benefit from `sk BETWEEN`
-- compare against baseline that queries the whole day bucket and filters in Java
-
-#### Workload D: mixed read/write workload
-
-Suggested mix:
-
-```text
-70% reads
-30% writes
-```
-
-Read mix:
-
-```text
-50% repeated historical room/user reads
-20% random historical room/user reads
-20% narrow historical reads
-10% recent-window reads that bypass cache
-```
-
-Purpose:
-
-- matches the Assignment 4 read-heavy test style
-- confirms recent-window queries still work without cache
-- measures end-to-end API behavior under mixed traffic
-
-### 4.6 Metrics to record
-
-JMeter metrics:
-
-- average response time
-- median / p50 response time
-- p95 response time
-- p99 response time
-- throughput in requests per second
-- error rate
-- top errors by sampler, including response code and affected endpoint
-- total completed requests
-
-Application/cache metrics:
-
-- Caffeine hit count
-- Caffeine miss count
-- Caffeine hit rate
-- Caffeine eviction count
-
-Freshness / projection metrics:
-
-- projection lag in milliseconds
-- `isConsistent` from the metrics report
-- delayed catch-up result for the same test window
-
-DynamoDB metrics:
-
-- `ConsumedReadCapacityUnits` for `room_messages`
-- `ConsumedReadCapacityUnits` for `user_messages`
-- successful request count / query count if available
-- throttled read requests, if any
-
-Server metrics:
-
-- `server-v2` CPU utilization
-- `server-v2` memory utilization
-- API query worker utilization / queue depth, if exposed
-- network in/out
+The benchmark does not separately report cache hit rate, DynamoDB consumed read
+capacity, projection lag, or server CPU/memory utilization. Those metrics would
+be useful for a deeper production validation run, but they are not used as
+claimed results in this report.
 
 ## 5. Future Optimizations
 
